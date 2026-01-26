@@ -34,6 +34,22 @@ import * as prism from "prism-media";
 
 import type { DiscordVoiceConfig } from "./config.js";
 import { getVadThreshold } from "./config.js";
+
+/**
+ * Get RMS threshold based on VAD sensitivity
+ * Higher = less sensitive (filters more noise)
+ */
+function getRmsThreshold(sensitivity: "low" | "medium" | "high"): number {
+  switch (sensitivity) {
+    case "low":
+      return 400;   // More sensitive - picks up quieter speech
+    case "high":
+      return 1200;  // Less sensitive - requires louder speech, filters more noise
+    case "medium":
+    default:
+      return 800;   // Balanced default
+  }
+}
 import { createSTTProvider, type STTProvider } from "./stt.js";
 import { createTTSProvider, type TTSProvider } from "./tts.js";
 import { StreamingSTTManager, createStreamingSTTProvider } from "./streaming-stt.js";
@@ -367,12 +383,16 @@ export class VoiceConnectionManager {
       // BARGE-IN: If we're speaking and user starts talking, stop immediately
       // But be careful - this could be echo from the bot itself!
       // ═══════════════════════════════════════════════════════════════
-      if (session.speaking) {
-        if (this.config.bargeIn) {
+      if (session.speaking || session.processing) {
+        if (this.config.bargeIn && session.speaking) {
           this.logger.info(`[discord-voice] Barge-in detected! Stopping speech.`);
           this.stopSpeaking(session);
           // Set cooldown to prevent immediate re-trigger from echo
           session.lastSpokeAt = Date.now();
+        }
+        // Clear any accumulated streaming transcripts to prevent stale text
+        if (this.streamingSTT) {
+          this.streamingSTT.closeSession(userId);
         }
         // Don't start recording yet - wait for next speech event after cooldown
         return;
@@ -584,7 +604,7 @@ export class VoiceConnectionManager {
 
     // Calculate RMS amplitude to filter out quiet sounds (keystrokes, background noise)
     const rms = this.calculateRMS(audioBuffer);
-    const minRMS = 500; // Threshold for 16-bit audio (0-32767 range), ~1.5% of max
+    const minRMS = getRmsThreshold(this.config.vadSensitivity);
     if (rms < minRMS) {
       this.logger.debug?.(`[discord-voice] Skipping quiet audio (RMS ${Math.round(rms)} < ${minRMS}) for user ${userId}`);
       return;
