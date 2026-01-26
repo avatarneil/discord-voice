@@ -37,6 +37,7 @@ import { getVadThreshold } from "./config.js";
 import { createSTTProvider, type STTProvider } from "./stt.js";
 import { createTTSProvider, type TTSProvider } from "./tts.js";
 import { StreamingSTTManager, createStreamingSTTProvider } from "./streaming-stt.js";
+import { createStreamingTTSProvider, type StreamingTTSProvider } from "./streaming-tts.js";
 
 interface Logger {
   info(msg: string): void;
@@ -74,6 +75,7 @@ export class VoiceConnectionManager {
   private sttProvider: STTProvider | null = null;
   private streamingSTT: StreamingSTTManager | null = null;
   private ttsProvider: TTSProvider | null = null;
+  private streamingTTS: StreamingTTSProvider | null = null;
   private logger: Logger;
   private onTranscript: (userId: string, guildId: string, channelId: string, text: string) => Promise<string>;
 
@@ -105,6 +107,10 @@ export class VoiceConnectionManager {
     }
     if (!this.ttsProvider) {
       this.ttsProvider = createTTSProvider(this.config);
+    }
+    // Initialize streaming TTS (always, for lower latency)
+    if (!this.streamingTTS) {
+      this.streamingTTS = createStreamingTTSProvider(this.config);
     }
     // Initialize streaming STT if using Deepgram with streaming enabled
     if (!this.streamingSTT && this.config.sttProvider === "deepgram" && this.config.streamingSTT) {
@@ -601,11 +607,9 @@ export class VoiceConnectionManager {
       throw new Error("Not connected to voice channel");
     }
 
-    if (!this.ttsProvider) {
-      this.ensureProviders();
-    }
+    this.ensureProviders();
 
-    if (!this.ttsProvider) {
+    if (!this.streamingTTS && !this.ttsProvider) {
       throw new Error("TTS provider not initialized");
     }
 
@@ -614,17 +618,47 @@ export class VoiceConnectionManager {
     try {
       this.logger.info(`[discord-voice] Speaking: "${text.substring(0, 50)}${text.length > 50 ? "..." : ""}"`);
       
-      const ttsResult = await this.ttsProvider.synthesize(text);
-      
-      // Create audio resource based on format
       let resource;
-      if (ttsResult.format === "opus") {
-        resource = createAudioResource(Readable.from(ttsResult.audioBuffer), {
-          inputType: StreamType.OggOpus,
-        });
-      } else {
-        // For mp3, create a resource that will be transcoded
-        resource = createAudioResource(Readable.from(ttsResult.audioBuffer));
+
+      // Try streaming TTS first (lower latency)
+      if (this.streamingTTS) {
+        try {
+          const streamResult = await this.streamingTTS.synthesizeStream(text);
+          
+          // Create audio resource from stream
+          if (streamResult.format === "opus") {
+            resource = createAudioResource(streamResult.stream, {
+              inputType: StreamType.OggOpus,
+            });
+          } else {
+            // For mp3, the audio player will transcode
+            resource = createAudioResource(streamResult.stream);
+          }
+          
+          this.logger.debug?.(`[discord-voice] Using streaming TTS`);
+        } catch (streamError) {
+          this.logger.warn(`[discord-voice] Streaming TTS failed, falling back to buffered: ${streamError instanceof Error ? streamError.message : String(streamError)}`);
+          // Fall through to buffered TTS
+        }
+      }
+
+      // Fallback to buffered TTS
+      if (!resource && this.ttsProvider) {
+        const ttsResult = await this.ttsProvider.synthesize(text);
+        
+        if (ttsResult.format === "opus") {
+          resource = createAudioResource(Readable.from(ttsResult.audioBuffer), {
+            inputType: StreamType.OggOpus,
+          });
+        } else {
+          resource = createAudioResource(Readable.from(ttsResult.audioBuffer));
+        }
+        
+        this.logger.debug?.(`[discord-voice] Using buffered TTS`);
+      }
+
+      if (!resource) {
+        throw new Error("Failed to create audio resource");
       }
 
       session.player.play(resource);
