@@ -4,6 +4,24 @@
   "type": "module",
   "description": "Discord voice channel plugin for Clawdbot - real-time voice conversations",
   "main": "index.ts",
+  "author": "Discord Voice Plugin Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawdbot/discord-voice"
+  },
+  "keywords": [
+    "clawdbot",
+    "discord",
+    "voice",
+    "speech-to-text",
+    "text-to-speech",
+    "ai",
+    "claude",
+    "whisper",
+    "deepgram",
+    "elevenlabs"
+  ],
   "dependencies": {
     "@discordjs/voice": "^0.18.0",
     "discord.js": "^14.16.3",
