@@ -573,12 +573,9 @@ export class VoiceConnectionManager {
       return;
     }
 
-    // Set processing lock
-    session.processing = true;
-
     const audioBuffer = Buffer.concat(chunks);
     
-    // Skip very short recordings (likely noise)
+    // Skip very short recordings (likely noise) - check BEFORE setting processing lock
     const durationMs = (audioBuffer.length / 2) / 48; // 16-bit samples at 48kHz
     if (durationMs < this.config.minAudioMs) {
       this.logger.debug?.(`[discord-voice] Skipping short recording (${Math.round(durationMs)}ms < ${this.config.minAudioMs}ms) for user ${userId}`);
@@ -592,6 +589,9 @@ export class VoiceConnectionManager {
       this.logger.debug?.(`[discord-voice] Skipping quiet audio (RMS ${Math.round(rms)} < ${minRMS}) for user ${userId}`);
       return;
     }
+
+    // Set processing lock AFTER passing all filters
+    session.processing = true;
 
     this.logger.info(`[discord-voice] Processing ${Math.round(durationMs)}ms of audio (RMS: ${Math.round(rms)}) from user ${userId}`);
 
