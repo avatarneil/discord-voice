@@ -626,12 +626,15 @@ export class VoiceConnectionManager {
       // Play looping thinking sound while processing
       const stopThinking = await this.startThinkingLoop(session);
 
-      // Get response from agent
-      const response = await this.onTranscript(userId, session.guildId, session.channelId, transcribedText);
-      
-      // Stop thinking sound and wait a moment for clean transition
-      stopThinking();
-      await new Promise(resolve => setTimeout(resolve, 100));
+      let response: string;
+      try {
+        // Get response from agent
+        response = await this.onTranscript(userId, session.guildId, session.channelId, transcribedText);
+      } finally {
+        // Always stop thinking sound, even on error
+        stopThinking();
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
       
       if (!response || response.trim().length === 0) {
         session.processing = false;
