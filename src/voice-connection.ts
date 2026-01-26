@@ -540,6 +540,12 @@ export class VoiceConnectionManager {
       return;
     }
 
+    // Skip if already speaking (prevents overlapping responses)
+    if (session.speaking) {
+      this.logger.debug?.(`[discord-voice] Skipping processing - already speaking`);
+      return;
+    }
+
     const audioBuffer = Buffer.concat(chunks);
     
     // Skip very short recordings (likely noise)
@@ -584,13 +590,17 @@ export class VoiceConnectionManager {
       // Get response from agent
       const response = await this.onTranscript(userId, session.guildId, session.channelId, transcribedText);
       
-      // Stop thinking sound
+      // Stop thinking sound and wait a moment for clean transition
       stopThinking();
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       if (!response || response.trim().length === 0) {
         return;
       }
 
+      // Ensure main player is subscribed before speaking
+      session.connection.subscribe(session.player);
+      
       // Synthesize and play response
       await this.speak(session.guildId, response);
     } catch (error) {
@@ -729,11 +739,11 @@ export class VoiceConnectionManager {
       return () => {
         stopped = true;
         if (thinkingPlayer) {
-          thinkingPlayer.stop(true);
           thinkingPlayer.removeAllListeners();
+          thinkingPlayer.stop(true);
         }
         session.thinkingPlayer = undefined;
-        // Re-subscribe main player
+        // Re-subscribe main player immediately
         session.connection.subscribe(session.player);
       };
     } catch (error) {
