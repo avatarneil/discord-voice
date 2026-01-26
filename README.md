@@ -7,9 +7,12 @@ Real-time voice conversations in Discord voice channels. Join a voice channel, s
 - **Join/Leave Voice Channels**: Via slash commands, CLI, or agent tool
 - **Voice Activity Detection (VAD)**: Automatically detects when users are speaking
 - **Speech-to-Text**: Whisper API (OpenAI) or Deepgram
+- **Streaming STT**: Real-time transcription with Deepgram WebSocket (~1s latency reduction)
 - **Agent Integration**: Transcribed speech is routed through the Clawdbot agent
 - **Text-to-Speech**: OpenAI TTS or ElevenLabs
 - **Audio Playback**: Responses are spoken back in the voice channel
+- **Barge-in Support**: Stops speaking immediately when user starts talking
+- **Auto-reconnect**: Automatic heartbeat monitoring and reconnection on disconnect
 
 ## Requirements
 
@@ -82,12 +85,16 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable/disable the plugin |
 | `sttProvider` | string | `"whisper"` | `"whisper"` or `"deepgram"` |
+| `streamingSTT` | boolean | `true` | Use streaming STT (Deepgram only, ~1s faster) |
 | `ttsProvider` | string | `"openai"` | `"openai"` or `"elevenlabs"` |
 | `ttsVoice` | string | `"nova"` | Voice ID for TTS |
 | `vadSensitivity` | string | `"medium"` | `"low"`, `"medium"`, or `"high"` |
+| `bargeIn` | boolean | `true` | Stop speaking when user talks |
 | `allowedUsers` | string[] | `[]` | User IDs allowed (empty = all) |
 | `silenceThresholdMs` | number | `1500` | Silence before processing (ms) |
 | `maxRecordingMs` | number | `30000` | Max recording length (ms) |
+| `heartbeatIntervalMs` | number | `30000` | Connection health check interval |
+| `autoJoinChannel` | string | `undefined` | Channel ID to auto-join on startup |
 
 ### Provider Configuration
 
@@ -167,6 +174,53 @@ The tool supports actions:
 5. **Process**: Transcribed text is sent to Clawdbot agent
 6. **Synthesize**: Agent response is converted to audio via TTS
 7. **Play**: Audio is played back in the voice channel
+
+## Streaming STT (Deepgram)
+
+When using Deepgram as your STT provider, streaming mode is enabled by default. This provides:
+
+- **~1 second faster** end-to-end latency
+- **Real-time feedback** with interim transcription results
+- **Automatic keep-alive** to prevent connection timeouts
+- **Fallback** to batch transcription if streaming fails
+
+To use streaming STT:
+```json5
+{
+  "sttProvider": "deepgram",
+  "streamingSTT": true,  // default
+  "deepgram": {
+    "apiKey": "...",
+    "model": "nova-2"
+  }
+}
+```
+
+## Barge-in Support
+
+When enabled (default), the bot will immediately stop speaking if a user starts talking. This creates a more natural conversational flow where you can interrupt the bot.
+
+To disable (let the bot finish speaking):
+```json5
+{
+  "bargeIn": false
+}
+```
+
+## Auto-reconnect
+
+The plugin includes automatic connection health monitoring:
+
+- **Heartbeat checks** every 30 seconds (configurable)
+- **Auto-reconnect** on disconnect with exponential backoff
+- **Max 3 attempts** before giving up
+
+If the connection drops, you'll see logs like:
+```
+[discord-voice] Disconnected from voice channel
+[discord-voice] Reconnection attempt 1/3
+[discord-voice] Reconnected successfully
+```
 
 ## VAD Sensitivity
 
