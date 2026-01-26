@@ -206,14 +206,14 @@ const discordVoicePlugin = {
         const sessionId = sessionEntry.sessionId;
         const sessionFile = deps.resolveSessionFilePath(sessionId, sessionEntry, { agentId });
 
-        // Resolve model
-        const modelRef = `${deps.DEFAULT_PROVIDER}/${deps.DEFAULT_MODEL}`;
+        // Resolve model - use voice-specific model if configured, otherwise default
+        const modelRef = cfg.model || `${deps.DEFAULT_PROVIDER}/${deps.DEFAULT_MODEL}`;
         const slashIndex = modelRef.indexOf("/");
         const provider = slashIndex === -1 ? deps.DEFAULT_PROVIDER : modelRef.slice(0, slashIndex);
         const model = slashIndex === -1 ? modelRef : modelRef.slice(slashIndex + 1);
 
-        // Resolve thinking level
-        const thinkLevel = deps.resolveThinkingDefault({ cfg: coreConfig, provider, model });
+        // Resolve thinking level - use voice-specific level if configured (default to "off" for speed)
+        const thinkLevel = cfg.thinkLevel || "off";
 
         // Resolve agent identity
         const identity = deps.resolveAgentIdentity(coreConfig, agentId);

@@ -23,6 +23,11 @@ export interface DiscordVoiceConfig {
   maxRecordingMs: number;
   autoJoinChannel?: string; // Channel ID to auto-join on startup
   heartbeatIntervalMs?: number;  // Connection health check interval
+  
+  // LLM settings for voice responses (use fast models for low latency)
+  model?: string;         // e.g. "anthropic/claude-3-5-haiku-latest" or "openai/gpt-4o-mini"
+  thinkLevel?: string;    // "off", "low", "medium", "high" - lower = faster
+  
   openai?: {
     apiKey?: string;
     whisperModel?: string;
@@ -48,10 +53,12 @@ export const DEFAULT_CONFIG: DiscordVoiceConfig = {
   vadSensitivity: "medium",
   bargeIn: true,            // Enable barge-in by default
   allowedUsers: [],
-  silenceThresholdMs: 1500,
-  minAudioMs: 500,
+  silenceThresholdMs: 1000, // 1 second - faster response after speech ends
+  minAudioMs: 300,          // 300ms minimum - filter very short noise
   maxRecordingMs: 30000,
   heartbeatIntervalMs: 30000,
+  // model: undefined - uses system default, recommend "anthropic/claude-3-5-haiku-latest" for speed
+  // thinkLevel: undefined - defaults to "off" for voice (fastest)
 };
 
 export function parseConfig(raw: unknown): DiscordVoiceConfig {
@@ -94,6 +101,8 @@ export function parseConfig(raw: unknown): DiscordVoiceConfig {
       typeof obj.heartbeatIntervalMs === "number"
         ? obj.heartbeatIntervalMs
         : DEFAULT_CONFIG.heartbeatIntervalMs,
+    model: typeof obj.model === "string" ? obj.model : undefined,
+    thinkLevel: typeof obj.thinkLevel === "string" ? obj.thinkLevel : undefined,
     openai: obj.openai && typeof obj.openai === "object"
       ? {
           apiKey: (obj.openai as Record<string, unknown>).apiKey as string | undefined,
