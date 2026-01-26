@@ -63,6 +63,7 @@ export interface VoiceSession {
   player: AudioPlayer;
   userAudioStates: Map<string, UserAudioState>;
   speaking: boolean;
+  lastSpokeAt?: number;          // Timestamp when bot finished speaking (for cooldown)
   thinkingPlayer?: AudioPlayer;  // Separate player for thinking sound
   heartbeatInterval?: ReturnType<typeof setInterval>;
   lastHeartbeat?: number;
@@ -546,6 +547,13 @@ export class VoiceConnectionManager {
       return;
     }
 
+    // Cooldown after speaking to prevent echo/accidental triggers (500ms)
+    const SPEAK_COOLDOWN_MS = 500;
+    if (session.lastSpokeAt && (Date.now() - session.lastSpokeAt) < SPEAK_COOLDOWN_MS) {
+      this.logger.debug?.(`[discord-voice] Skipping processing - in cooldown period after speaking`);
+      return;
+    }
+
     const audioBuffer = Buffer.concat(chunks);
     
     // Skip very short recordings (likely noise)
@@ -685,6 +693,7 @@ export class VoiceConnectionManager {
       await new Promise<void>((resolve) => {
         const onIdle = () => {
           session.speaking = false;
+          session.lastSpokeAt = Date.now(); // Set cooldown timestamp
           session.player.off(AudioPlayerStatus.Idle, onIdle);
           session.player.off("error", onError);
           resolve();
@@ -693,6 +702,7 @@ export class VoiceConnectionManager {
         const onError = (error: Error) => {
           this.logger.error(`[discord-voice] Playback error: ${error.message}`);
           session.speaking = false;
+          session.lastSpokeAt = Date.now(); // Set cooldown timestamp
           session.player.off(AudioPlayerStatus.Idle, onIdle);
           session.player.off("error", onError);
           resolve();
@@ -703,6 +713,7 @@ export class VoiceConnectionManager {
       });
     } catch (error) {
       session.speaking = false;
+      session.lastSpokeAt = Date.now(); // Set cooldown timestamp
       throw error;
     }
   }
