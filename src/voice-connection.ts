@@ -381,33 +381,25 @@ export class VoiceConnectionManager {
       this.logger.debug?.(`[discord-voice] User ${userId} started speaking`);
       
       // ═══════════════════════════════════════════════════════════════
-      // BARGE-IN: If we're speaking and user starts talking, stop immediately
-      // But be careful - this could be echo from the bot itself!
+      // BARGE-IN / ECHO SUPPRESSION
+      // Discord's voice detection can't distinguish between the user talking
+      // and echo from the bot's own audio playback. We disable barge-in while
+      // speaking to prevent the bot from interrupting itself.
       // ═══════════════════════════════════════════════════════════════
-      if (session.speaking || session.processing) {
-        // Ignore potential echo during the first 1.5s of speech playback
-        // Discord often picks up the bot's own audio output as "speech"
-        const ECHO_SUPPRESSION_MS = 1500;
-        const timeSinceSpeakingStarted = session.startedSpeakingAt 
-          ? Date.now() - session.startedSpeakingAt 
-          : Infinity;
-        
-        if (timeSinceSpeakingStarted < ECHO_SUPPRESSION_MS) {
-          this.logger.debug?.(`[discord-voice] Ignoring speech during echo suppression window (${Math.round(timeSinceSpeakingStarted)}ms < ${ECHO_SUPPRESSION_MS}ms)`);
-          return;
-        }
-        
-        if (this.config.bargeIn && session.speaking) {
-          this.logger.info(`[discord-voice] Barge-in detected! Stopping speech.`);
-          this.stopSpeaking(session);
-          // Set cooldown to prevent immediate re-trigger from echo
-          session.lastSpokeAt = Date.now();
-        }
+      if (session.speaking) {
+        // While bot is actively speaking, ignore all speech events
+        // This prevents echo from triggering barge-in
+        this.logger.debug?.(`[discord-voice] Ignoring speech while bot is speaking (echo suppression)`);
+        return;
+      }
+      
+      if (session.processing) {
+        // While processing a request, don't start new recordings
         // Clear any accumulated streaming transcripts to prevent stale text
         if (this.streamingSTT) {
           this.streamingSTT.closeSession(userId);
         }
-        // Don't start recording yet - wait for next speech event after cooldown
+        this.logger.debug?.(`[discord-voice] Ignoring speech while processing`);
         return;
       }
 
