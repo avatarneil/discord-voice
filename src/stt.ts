@@ -114,15 +114,22 @@ export class DeepgramSTT implements STTProvider {
   }
 
   async transcribe(audioBuffer: Buffer, sampleRate: number): Promise<STTResult> {
-    const response = await fetch(
-      `https://api.deepgram.com/v1/listen?model=${this.model}&encoding=linear16&sample_rate=${sampleRate}`,
-      {
+    // Deepgram expects: encoding=linear16, sample_rate, channels=1
+    const url = new URL("https://api.deepgram.com/v1/listen");
+    url.searchParams.set("model", this.model);
+    url.searchParams.set("encoding", "linear16");
+    url.searchParams.set("sample_rate", sampleRate.toString());
+    url.searchParams.set("channels", "1");
+    url.searchParams.set("punctuate", "true");
+    url.searchParams.set("smart_format", "true");
+
+    const response = await fetch(url.toString(), {
         method: "POST",
         headers: {
           Authorization: `Token ${this.apiKey}`,
-          "Content-Type": "audio/raw",
+          "Content-Type": "application/octet-stream",
         },
-        body: new Uint8Array(audioBuffer),
+        body: audioBuffer,
       }
     );
 
