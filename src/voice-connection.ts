@@ -63,6 +63,7 @@ export interface VoiceSession {
   player: AudioPlayer;
   userAudioStates: Map<string, UserAudioState>;
   speaking: boolean;
+  processing: boolean;           // Lock to prevent concurrent processing
   lastSpokeAt?: number;          // Timestamp when bot finished speaking (for cooldown)
   thinkingPlayer?: AudioPlayer;  // Separate player for thinking sound
   heartbeatInterval?: ReturnType<typeof setInterval>;
@@ -153,6 +154,7 @@ export class VoiceConnectionManager {
       player,
       userAudioStates: new Map(),
       speaking: false,
+      processing: false,
       lastHeartbeat: Date.now(),
     };
 
@@ -558,12 +560,21 @@ export class VoiceConnectionManager {
       return;
     }
 
+    // Skip if already processing another request (prevents duplicate responses)
+    if (session.processing) {
+      this.logger.debug?.(`[discord-voice] Skipping processing - already processing another request`);
+      return;
+    }
+
     // Cooldown after speaking to prevent echo/accidental triggers (500ms)
     const SPEAK_COOLDOWN_MS = 500;
     if (session.lastSpokeAt && (Date.now() - session.lastSpokeAt) < SPEAK_COOLDOWN_MS) {
       this.logger.debug?.(`[discord-voice] Skipping processing - in cooldown period after speaking`);
       return;
     }
+
+    // Set processing lock
+    session.processing = true;
 
     const audioBuffer = Buffer.concat(chunks);
     
@@ -606,6 +617,7 @@ export class VoiceConnectionManager {
       
       if (!transcribedText || transcribedText.trim().length === 0) {
         this.logger.debug?.(`[discord-voice] Empty transcription for user ${userId}`);
+        session.processing = false;
         return;
       }
 
@@ -622,6 +634,7 @@ export class VoiceConnectionManager {
       await new Promise(resolve => setTimeout(resolve, 100));
       
       if (!response || response.trim().length === 0) {
+        session.processing = false;
         return;
       }
 
@@ -632,6 +645,8 @@ export class VoiceConnectionManager {
       await this.speak(session.guildId, response);
     } catch (error) {
       this.logger.error(`[discord-voice] Error processing audio: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      session.processing = false;
     }
   }
 
