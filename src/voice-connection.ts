@@ -352,16 +352,27 @@ export class VoiceConnectionManager {
         return;
       }
 
+      // Ignore audio during cooldown period (prevents echo from triggering)
+      const SPEAK_COOLDOWN_MS = 800;
+      if (session.lastSpokeAt && (Date.now() - session.lastSpokeAt) < SPEAK_COOLDOWN_MS) {
+        this.logger.debug?.(`[discord-voice] Ignoring speech during cooldown (likely echo)`);
+        return;
+      }
+
       this.logger.debug?.(`[discord-voice] User ${userId} started speaking`);
       
       // ═══════════════════════════════════════════════════════════════
       // BARGE-IN: If we're speaking and user starts talking, stop immediately
+      // But be careful - this could be echo from the bot itself!
       // ═══════════════════════════════════════════════════════════════
-      if (session.speaking && this.config.bargeIn) {
-        this.logger.info(`[discord-voice] Barge-in detected! Stopping speech.`);
-        this.stopSpeaking(session);
-      } else if (session.speaking) {
-        // Barge-in disabled, ignore user speech while we're talking
+      if (session.speaking) {
+        if (this.config.bargeIn) {
+          this.logger.info(`[discord-voice] Barge-in detected! Stopping speech.`);
+          this.stopSpeaking(session);
+          // Set cooldown to prevent immediate re-trigger from echo
+          session.lastSpokeAt = Date.now();
+        }
+        // Don't start recording yet - wait for next speech event after cooldown
         return;
       }
 
