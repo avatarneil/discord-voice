@@ -11,7 +11,7 @@ export interface VoiceCallTtsConfig {
 
 export interface DiscordVoiceConfig {
   enabled: boolean;
-  sttProvider: "whisper" | "deepgram";
+  sttProvider: "whisper" | "deepgram" | "local-whisper";
   streamingSTT: boolean; // Use streaming STT (Deepgram only) for lower latency
   ttsProvider: "openai" | "elevenlabs" | "kokoro";
   ttsVoice: string;
@@ -42,6 +42,10 @@ export interface DiscordVoiceConfig {
     apiKey?: string;
     model?: string;
   };
+  localWhisper?: {
+    model?: string; // e.g., "Xenova/whisper-tiny.en"
+    quantized?: boolean;
+  };
   kokoro?: {
     modelId?: string;
     dtype?: "fp32" | "fp16" | "q8" | "q4" | "q4f16";
@@ -50,7 +54,7 @@ export interface DiscordVoiceConfig {
 
 export const DEFAULT_CONFIG: DiscordVoiceConfig = {
   enabled: true,
-  sttProvider: "whisper",
+  sttProvider: "local-whisper",
   streamingSTT: true, // Enable streaming by default when using Deepgram
   ttsProvider: "openai",
   ttsVoice: "nova",
@@ -74,7 +78,9 @@ export function parseConfig(raw: unknown): DiscordVoiceConfig {
 
   return {
     enabled: typeof obj.enabled === "boolean" ? obj.enabled : DEFAULT_CONFIG.enabled,
-    sttProvider: obj.sttProvider === "deepgram" ? "deepgram" : "whisper",
+    sttProvider: ["whisper", "deepgram", "local-whisper"].includes(obj.sttProvider as string)
+      ? (obj.sttProvider as "whisper" | "deepgram" | "local-whisper")
+      : DEFAULT_CONFIG.sttProvider,
     streamingSTT: typeof obj.streamingSTT === "boolean" ? obj.streamingSTT : DEFAULT_CONFIG.streamingSTT,
     ttsProvider: ["openai", "elevenlabs", "kokoro"].includes(obj.ttsProvider as string)
       ? (obj.ttsProvider as "openai" | "elevenlabs" | "kokoro")
@@ -118,6 +124,16 @@ export function parseConfig(raw: unknown): DiscordVoiceConfig {
         ? {
             apiKey: (obj.deepgram as Record<string, unknown>).apiKey as string | undefined,
             model: ((obj.deepgram as Record<string, unknown>).model as string) || "nova-2",
+          }
+        : undefined,
+    localWhisper:
+      obj.localWhisper && typeof obj.localWhisper === "object"
+        ? {
+            model: ((obj.localWhisper as Record<string, unknown>).model as string) || "Xenova/whisper-tiny.en",
+            quantized:
+              typeof (obj.localWhisper as Record<string, unknown>).quantized === "boolean"
+                ? ((obj.localWhisper as Record<string, unknown>).quantized as boolean)
+                : true,
           }
         : undefined,
     kokoro:

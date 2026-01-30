@@ -3,6 +3,12 @@
  */
 
 import type { DiscordVoiceConfig } from "./config.js";
+import { pipeline, env } from "@xenova/transformers";
+import { WaveFile } from "wavefile";
+
+// Disable local model checks if not using local models, but here we want local
+env.allowLocalModels = false; // We want to download from Hub first
+env.useBrowserCache = false; // Ensure Node cache is used
 
 export interface STTResult {
   text: string;
@@ -124,14 +130,13 @@ export class DeepgramSTT implements STTProvider {
     url.searchParams.set("smart_format", "true");
 
     const response = await fetch(url.toString(), {
-        method: "POST",
-        headers: {
-          Authorization: `Token ${this.apiKey}`,
-          "Content-Type": "application/octet-stream",
-        },
-        body: audioBuffer,
-      }
-    );
+      method: "POST",
+      headers: {
+        Authorization: `Token ${this.apiKey}`,
+        "Content-Type": "application/octet-stream",
+      },
+      body: audioBuffer,
+    });
 
     if (!response.ok) {
       const error = await response.text();

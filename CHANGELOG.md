@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Local Whisper STT support (offline, privacy-focused)
 - Kokoro local TTS support (offline, high-quality, free)
 - Initial release of Discord Voice Plugin
 - Voice Activity Detection (VAD) for automatic speech detection
