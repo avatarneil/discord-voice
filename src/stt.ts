@@ -7,7 +7,7 @@ import { pipeline, env } from "@xenova/transformers";
 import { WaveFile } from "wavefile";
 
 // Disable local model checks if not using local models, but here we want local
-env.allowLocalModels = false; // We want to download from Hub first
+env.allowLocalModels = true; // Allow loading from local file system
 env.useBrowserCache = false; // Ensure Node cache is used
 
 export interface STTResult {
@@ -69,37 +69,9 @@ export class WhisperSTT implements STTProvider {
    * Convert raw PCM audio to WAV format
    */
   private pcmToWav(pcmBuffer: Buffer, sampleRate: number): Buffer {
-    const numChannels = 1; // Mono
-    const bitsPerSample = 16;
-    const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
-    const blockAlign = (numChannels * bitsPerSample) / 8;
-    const dataSize = pcmBuffer.length;
-    const headerSize = 44;
-    const fileSize = headerSize + dataSize - 8;
-
-    const buffer = Buffer.alloc(headerSize + dataSize);
-
-    // RIFF header
-    buffer.write("RIFF", 0);
-    buffer.writeUInt32LE(fileSize, 4);
-    buffer.write("WAVE", 8);
-
-    // fmt chunk
-    buffer.write("fmt ", 12);
-    buffer.writeUInt32LE(16, 16); // Chunk size
-    buffer.writeUInt16LE(1, 20); // Audio format (PCM)
-    buffer.writeUInt16LE(numChannels, 22);
-    buffer.writeUInt32LE(sampleRate, 24);
-    buffer.writeUInt32LE(byteRate, 28);
-    buffer.writeUInt16LE(blockAlign, 32);
-    buffer.writeUInt16LE(bitsPerSample, 34);
-
-    // data chunk
-    buffer.write("data", 36);
-    buffer.writeUInt32LE(dataSize, 40);
-    pcmBuffer.copy(buffer, headerSize);
-
-    return buffer;
+    const wav = new WaveFile();
+    wav.fromScratch(1, sampleRate, "16", pcmBuffer);
+    return Buffer.from(wav.toBuffer());
   }
 }
 
@@ -178,6 +150,7 @@ let sharedWhisperPipeline: ASRPipeline | null = null;
 export class LocalWhisperSTT implements STTProvider {
   private model: string;
   private quantized: boolean;
+  private static initializationPromise: Promise<void> | null = null;
 
   constructor(config: DiscordVoiceConfig) {
     this.model = config.localWhisper?.model || "Xenova/whisper-tiny.en";
@@ -187,12 +160,24 @@ export class LocalWhisperSTT implements STTProvider {
   private async ensureInitialized() {
     if (sharedWhisperPipeline) return;
 
-    console.log(`Loading local Whisper model: ${this.model} (quantized: ${this.quantized})...`);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sharedWhisperPipeline = (await pipeline("automatic-speech-recognition", this.model, {
-      quantized: this.quantized,
-    })) as unknown as ASRPipeline;
-    console.log("Local Whisper model loaded.");
+    if (!LocalWhisperSTT.initializationPromise) {
+      LocalWhisperSTT.initializationPromise = (async () => {
+        try {
+          console.log(`Loading local Whisper model: ${this.model} (quantized: ${this.quantized})...`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          sharedWhisperPipeline = (await pipeline("automatic-speech-recognition", this.model, {
+            quantized: this.quantized,
+          })) as unknown as ASRPipeline;
+          console.log("Local Whisper model loaded.");
+        } catch (error) {
+          console.error("Failed to load local Whisper model:", error);
+          LocalWhisperSTT.initializationPromise = null; // Reset on failure to allow retry
+          throw error;
+        }
+      })();
+    }
+
+    await LocalWhisperSTT.initializationPromise;
   }
 
   async transcribe(audioBuffer: Buffer, sampleRate: number): Promise<STTResult> {
