@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-01-26
 
 ### Added
+
+- Local Whisper STT support (offline, privacy-focused)
+- Kokoro local TTS support (offline, high-quality, free)
 - Initial release of Discord Voice Plugin
 - Voice Activity Detection (VAD) for automatic speech detection
 - Speech-to-Text support with Whisper (OpenAI) and Deepgram
@@ -26,12 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Thinking sound indicator during agent processing
 
 ### Fixed
+
 - Buffer audio during streaming STT connection setup
 - Move processing lock after audio filters to prevent permanent lock
 - Always stop thinking sound even if agent call fails
 - Remove lane restriction to allow full tool access
 
 ### Security
+
 - API key validation for STT/TTS providers
 - User permission checks for allowed users
 - Environment variable support for sensitive credentials

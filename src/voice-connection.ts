@@ -444,8 +444,10 @@ export class VoiceConnectionManager {
 
       // Set silence timer to process the recording
       state.silenceTimer = setTimeout(async () => {
-        if (state.isRecording && state.chunks.length > 0) {
+        if (state.isRecording) {
+          const chunksToProcess = [...state.chunks];
           state.isRecording = false;
+          state.chunks = [];
           
           // Clean up streams
           if (state.opusStream) {
@@ -457,8 +459,9 @@ export class VoiceConnectionManager {
             state.decoder = undefined;
           }
           
-          await this.processRecording(session, userId, state.chunks);
-          state.chunks = [];
+          if (chunksToProcess.length > 0) {
+            await this.processRecording(session, userId, chunksToProcess);
+          }
         }
       }, this.config.silenceThresholdMs);
     });
@@ -492,9 +495,13 @@ export class VoiceConnectionManager {
 
     const opusStream = session.connection.receiver.subscribe(userId, {
       end: {
-        behavior: EndBehaviorType.AfterSilence,
-        duration: this.config.silenceThresholdMs,
+        behavior: EndBehaviorType.Manual,
       },
+    });
+
+    // Handle stream errors to prevent crashes
+    opusStream.on("error", (error) => {
+      this.logger.error(`[discord-voice] AudioReceiveStream error for user ${userId}: ${error.message}`);
     });
 
     state.opusStream = opusStream;
@@ -537,7 +544,17 @@ export class VoiceConnectionManager {
           if (durationMs >= this.config.maxRecordingMs) {
             this.logger.debug?.(`[discord-voice] Max recording length reached for user ${userId}`);
             state.isRecording = false;
-            this.processRecording(session, userId, state.chunks);
+            
+            if (state.opusStream) {
+              state.opusStream.destroy();
+              state.opusStream = undefined;
+            }
+            if (state.decoder) {
+              state.decoder.destroy();
+              state.decoder = undefined;
+            }
+
+            this.processRecording(session, userId, [...state.chunks]);
             state.chunks = [];
           }
         }
@@ -555,7 +572,17 @@ export class VoiceConnectionManager {
           if (durationMs >= this.config.maxRecordingMs) {
             this.logger.debug?.(`[discord-voice] Max recording length reached for user ${userId}`);
             state.isRecording = false;
-            this.processRecording(session, userId, state.chunks);
+
+            if (state.opusStream) {
+              state.opusStream.destroy();
+              state.opusStream = undefined;
+            }
+            if (state.decoder) {
+              state.decoder.destroy();
+              state.decoder = undefined;
+            }
+
+            this.processRecording(session, userId, [...state.chunks]);
             state.chunks = [];
           }
         }
