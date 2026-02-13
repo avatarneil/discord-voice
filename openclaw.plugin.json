@@ -12,8 +12,9 @@
       },
       "sttProvider": {
         "type": "string",
-        "enum": ["whisper", "deepgram"],
-        "default": "whisper"
+        "enum": ["whisper", "gpt4o-mini", "deepgram"],
+        "default": "whisper",
+        "description": "whisper (legacy), gpt4o-mini (higher quality), or deepgram"
       },
       "streamingSTT": {
         "type": "boolean",
@@ -79,7 +80,11 @@
         "properties": {
           "apiKey": { "type": "string" },
           "voiceId": { "type": "string" },
-          "modelId": { "type": "string", "default": "eleven_multilingual_v2" }
+          "modelId": {
+            "type": "string",
+            "default": "eleven_multilingual_v2",
+            "description": "v2, v3 (Eleven v3), turbo, or full model ID"
+          }
         }
       },
       "deepgram": {
@@ -98,7 +103,7 @@
     },
     "sttProvider": {
       "label": "Speech-to-Text Provider",
-      "help": "Use 'whisper' (OpenAI) or 'deepgram'"
+      "help": "whisper, gpt4o-mini (OpenAI), or deepgram"
     },
     "ttsProvider": {
       "label": "Text-to-Speech Provider",
@@ -118,6 +123,10 @@
     },
     "openai.apiKey": { "label": "OpenAI API Key", "sensitive": true },
     "elevenlabs.apiKey": { "label": "ElevenLabs API Key", "sensitive": true },
+    "elevenlabs.modelId": {
+      "label": "ElevenLabs Model",
+      "help": "v2, v3 (Eleven v3), turbo, or full model ID"
+    },
     "deepgram.apiKey": { "label": "Deepgram API Key", "sensitive": true }
   }
 }

@@ -11,7 +11,7 @@ export interface VoiceCallTtsConfig {
 
 export interface DiscordVoiceConfig {
   enabled: boolean;
-  sttProvider: "whisper" | "deepgram";
+  sttProvider: "whisper" | "gpt4o-mini" | "deepgram";
   streamingSTT: boolean;  // Use streaming STT (Deepgram only) for lower latency
   ttsProvider: "openai" | "elevenlabs";
   ttsVoice: string;
@@ -36,6 +36,10 @@ export interface DiscordVoiceConfig {
   elevenlabs?: {
     apiKey?: string;
     voiceId?: string;
+    /**
+     * Model ID: eleven_multilingual_v2 (default), eleven_multilingual_v3 (Eleven v3),
+     * eleven_turbo_v2_5, eleven_flash_v2_5, etc.
+     */
     modelId?: string;
   };
   deepgram?: {
@@ -61,6 +65,16 @@ export const DEFAULT_CONFIG: DiscordVoiceConfig = {
   // thinkLevel: undefined - defaults to "off" for voice (fastest)
 };
 
+/** Resolve ElevenLabs model ID; supports shorthands v2, v3, turbo */
+function resolveElevenLabsModelId(raw: unknown): string {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (s === "v3") return "eleven_multilingual_v3";
+  if (s === "v2") return "eleven_multilingual_v2";
+  if (s === "turbo") return "eleven_turbo_v2_5";
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return "eleven_multilingual_v2";
+}
+
 export function parseConfig(raw: unknown): DiscordVoiceConfig {
   if (!raw || typeof raw !== "object") {
     return DEFAULT_CONFIG;
@@ -70,7 +84,12 @@ export function parseConfig(raw: unknown): DiscordVoiceConfig {
 
   return {
     enabled: typeof obj.enabled === "boolean" ? obj.enabled : DEFAULT_CONFIG.enabled,
-    sttProvider: obj.sttProvider === "deepgram" ? "deepgram" : "whisper",
+    sttProvider:
+      obj.sttProvider === "deepgram"
+        ? "deepgram"
+        : obj.sttProvider === "gpt4o-mini"
+          ? "gpt4o-mini"
+          : "whisper",
     streamingSTT: typeof obj.streamingSTT === "boolean" ? obj.streamingSTT : DEFAULT_CONFIG.streamingSTT,
     ttsProvider: obj.ttsProvider === "elevenlabs" ? "elevenlabs" : "openai",
     ttsVoice: typeof obj.ttsVoice === "string" ? obj.ttsVoice : DEFAULT_CONFIG.ttsVoice,
@@ -114,7 +133,7 @@ export function parseConfig(raw: unknown): DiscordVoiceConfig {
       ? {
           apiKey: (obj.elevenlabs as Record<string, unknown>).apiKey as string | undefined,
           voiceId: (obj.elevenlabs as Record<string, unknown>).voiceId as string | undefined,
-          modelId: ((obj.elevenlabs as Record<string, unknown>).modelId as string) || "eleven_multilingual_v2",
+          modelId: resolveElevenLabsModelId((obj.elevenlabs as Record<string, unknown>).modelId),
         }
       : undefined,
     deepgram: obj.deepgram && typeof obj.deepgram === "object"

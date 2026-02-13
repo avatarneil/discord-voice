@@ -98,7 +98,7 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable/disable the plugin |
-| `sttProvider` | string | `"whisper"` | `"whisper"` or `"deepgram"` |
+| `sttProvider` | string | `"whisper"` | `"whisper"`, `"gpt4o-mini"` (OpenAI), or `"deepgram"` |
 | `streamingSTT` | boolean | `true` | Use streaming STT (Deepgram only, ~1s faster) |
 | `ttsProvider` | string | `"openai"` | `"openai"` or `"elevenlabs"` |
 | `ttsVoice` | string | `"nova"` | Voice ID for TTS |
@@ -112,16 +112,17 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
 
 ### Provider Configuration
 
-#### OpenAI (Whisper + TTS)
+#### OpenAI (STT + TTS)
 ```json5
 {
   "openai": {
     "apiKey": "sk-...",
-    "whisperModel": "whisper-1",
+    "whisperModel": "whisper-1",     // or use sttProvider: "gpt4o-mini"
     "ttsModel": "tts-1"
   }
 }
 ```
+Use `sttProvider: "gpt4o-mini"` for higher-quality transcription via GPT-4o mini transcribe.
 
 #### ElevenLabs (TTS only)
 ```json5
@@ -129,10 +130,12 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
   "elevenlabs": {
     "apiKey": "...",
     "voiceId": "21m00Tcm4TlvDq8ikWAM",  // Rachel
-    "modelId": "eleven_multilingual_v2"
+    "modelId": "eleven_multilingual_v2"  // or "v3" for Eleven v3, "turbo" for lower latency
   }
 }
 ```
+- `modelId: "v3"` or `"eleven_multilingual_v3"` – Eleven v3 (most expressive)
+- `modelId: "turbo"` – eleven_turbo_v2_5 (faster, lower latency)
 
 #### Deepgram (STT only)
 ```json5
