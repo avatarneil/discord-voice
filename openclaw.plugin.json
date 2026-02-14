@@ -12,7 +12,7 @@
       },
       "sttProvider": {
         "type": "string",
-        "enum": ["whisper", "gpt4o-mini", "gpt4o-transcribe", "gpt4o-transcribe-diarize", "deepgram"],
+        "enum": ["whisper", "gpt4o-mini", "gpt4o-transcribe", "gpt4o-transcribe-diarize", "deepgram", "local-whisper"],
         "default": "whisper",
         "description": "OpenAI: whisper, gpt4o-mini, gpt4o-transcribe, gpt4o-transcribe-diarize; or deepgram"
       },
@@ -23,8 +23,9 @@
       },
       "ttsProvider": {
         "type": "string",
-        "enum": ["openai", "elevenlabs"],
-        "default": "openai"
+        "enum": ["openai", "elevenlabs", "kokoro"],
+        "default": "openai",
+        "description": "openai, elevenlabs, or kokoro (free local)"
       },
       "ttsVoice": {
         "type": "string",
@@ -132,7 +133,7 @@
       },
     "ttsProvider": {
       "label": "Text-to-Speech Provider",
-      "help": "Use 'openai' or 'elevenlabs'"
+      "help": "openai, elevenlabs, or kokoro (free local)"
     },
     "ttsVoice": {
       "label": "TTS Voice",

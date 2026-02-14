@@ -12,7 +12,7 @@
       },
       "sttProvider": {
         "type": "string",
-        "enum": ["whisper", "gpt4o-mini", "gpt4o-transcribe", "gpt4o-transcribe-diarize", "deepgram"],
+        "enum": ["whisper", "gpt4o-mini", "gpt4o-transcribe", "gpt4o-transcribe-diarize", "deepgram", "local-whisper"],
         "default": "whisper"
       },
       "streamingSTT": {
@@ -22,8 +22,9 @@
       },
       "ttsProvider": {
         "type": "string",
-        "enum": ["openai", "elevenlabs"],
-        "default": "openai"
+        "enum": ["openai", "elevenlabs", "kokoro"],
+        "default": "openai",
+        "description": "openai, elevenlabs, or kokoro (free local)"
       },
       "ttsVoice": {
         "type": "string",
