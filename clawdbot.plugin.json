@@ -12,7 +12,7 @@
       },
       "sttProvider": {
         "type": "string",
-        "enum": ["whisper", "gpt4o-mini", "gpt4o-transcribe", "gpt4o-transcribe-diarize", "deepgram", "local-whisper"],
+        "enum": ["whisper", "gpt4o-mini", "gpt4o-transcribe", "gpt4o-transcribe-diarize", "deepgram", "local-whisper", "wyoming-whisper"],
         "default": "whisper"
       },
       "streamingSTT": {

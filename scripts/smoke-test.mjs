@@ -104,6 +104,11 @@ if (existsSync(sttPath)) {
   } else {
     fail("stt.ts: LocalWhisperSTT or local-whisper case missing");
   }
+  if (sttContent.includes("WyomingWhisperSTT") && sttContent.includes('case "wyoming-whisper"')) {
+    ok("stt.ts: WyomingWhisperSTT and wyoming-whisper provider present");
+  } else {
+    fail("stt.ts: WyomingWhisperSTT or wyoming-whisper case missing");
+  }
 } else {
   fail("src/stt.ts missing");
 }

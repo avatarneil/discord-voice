@@ -118,7 +118,7 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable/disable the plugin |
-| `sttProvider` | string | `"whisper"` | `"whisper"`, `"local-whisper"`, `"gpt4o-mini"`, `"gpt4o-transcribe"`, `"gpt4o-transcribe-diarize"` (OpenAI), or `"deepgram"` |
+| `sttProvider` | string | `"whisper"` | `"whisper"`, `"local-whisper"`, `"wyoming-whisper"`, `"gpt4o-mini"`, `"gpt4o-transcribe"`, `"gpt4o-transcribe-diarize"` (OpenAI), or `"deepgram"` |
 | `streamingSTT` | boolean | `true` | Use streaming STT (Deepgram only, ~1s faster) |
 | `ttsProvider` | string | `"openai"` | `"openai"`, `"elevenlabs"`, `"deepgram"`, `"polly"`, `"edge"`, or `"kokoro"` |
 | `ttsVoice` | string | `"nova"` | Deprecated – use provider-specific: `openai.voice`, `elevenlabs.voiceId`, `kokoro.voice` |
@@ -224,6 +224,29 @@ No API key required. Runs locally using Xenova/Transformers.
   },
 }
 ```
+
+#### Wyoming Faster Whisper (STT only, remote over network)
+
+Connects to a [Wyoming Faster Whisper](https://github.com/rhasspy/wyoming-faster-whisper) server over TCP. Run the server on a host (e.g. Docker) and point the plugin at `host:port`.
+
+```json5
+{
+  sttProvider: "wyoming-whisper",
+  wyomingWhisper: {
+    host: "192.168.1.10",   // or "remote-host.local"
+    port: 10300,            // default Wyoming port
+    language: "de",         // optional hint (de, en, etc.)
+  },
+}
+// Alternative: use uri instead of host+port
+{
+  wyomingWhisper: {
+    uri: "192.168.1.10:10300",
+  },
+}
+```
+
+Run Wyoming Faster Whisper (Docker): `docker run -p 10300:10300 -v /data:/data rhasspy/wyoming-whisper --model tiny-int8 --language en`
 
 #### Edge TTS (Microsoft) – Free
 

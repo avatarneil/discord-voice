@@ -2,6 +2,7 @@
  * Speech-to-Text providers
  */
 
+import * as net from "node:net";
 import type { DiscordVoiceConfig } from "./config.js";
 import { pipeline, env } from "@xenova/transformers";
 import { WaveFile } from "wavefile";
@@ -329,6 +330,115 @@ export class LocalWhisperSTT implements STTProvider {
 }
 
 /**
+ * Wyoming Whisper STT Provider (Remote)
+ *
+ * Connects to a Wyoming Faster Whisper server (e.g. wyoming-faster-whisper)
+ * over TCP. Server runs on host:port (default 10300).
+ * See: https://github.com/rhasspy/wyoming-faster-whisper
+ */
+export class WyomingWhisperSTT implements STTProvider {
+  private host: string;
+  private port: number;
+  private language: string | undefined;
+  private connectTimeoutMs: number;
+
+  constructor(config: DiscordVoiceConfig) {
+    const ww = config.wyomingWhisper ?? {};
+    this.host = ww.host ?? "127.0.0.1";
+    this.port = ww.port ?? 10300;
+    this.language = typeof ww.language === "string" && ww.language.trim() ? ww.language.trim() : undefined;
+    this.connectTimeoutMs = typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? ww.connectTimeoutMs : 10000;
+  }
+
+  async transcribe(audioBuffer: Buffer, sampleRate: number): Promise<STTResult> {
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      const finish = (text: string) => {
+        if (resolved) return;
+        resolved = true;
+        socket.removeAllListeners();
+        socket.end();
+        resolve({ text: text.trim(), language: this.language });
+      };
+
+      const socket = net.createConnection({ host: this.host, port: this.port }, () => {
+        let transcriptText = "";
+        let lineBuffer = "";
+        const rate = sampleRate;
+        const width = 2;
+        const channels = 1;
+
+        const sendMessage = (type: string, data: Record<string, unknown>, payload?: Buffer) => {
+          const payloadLen = payload ? payload.length : 0;
+          const header = JSON.stringify({
+            type,
+            data,
+            data_length: 0,
+            payload_length: payloadLen,
+          }) + "\n";
+          socket.write(header);
+          if (payload && payloadLen > 0) socket.write(payload);
+        };
+
+        socket.on("data", (chunk: Buffer) => {
+          lineBuffer += chunk.toString("utf-8");
+          let idx: number;
+          while ((idx = lineBuffer.indexOf("\n")) !== -1) {
+            const line = lineBuffer.slice(0, idx);
+            lineBuffer = lineBuffer.slice(idx + 1);
+            try {
+              const msg = JSON.parse(line) as { type: string; data?: { text?: string } };
+              if (msg.type === "transcript" && msg.data?.text != null) {
+                transcriptText = msg.data.text;
+                finish(transcriptText);
+                return;
+              }
+              if (msg.type === "transcript-chunk" && msg.data?.text != null) {
+                transcriptText += msg.data.text;
+              }
+              if (msg.type === "transcript-stop") {
+                finish(transcriptText);
+                return;
+              }
+            } catch {
+              // skip malformed lines
+            }
+          }
+        });
+
+        socket.on("error", (err) => {
+          if (!resolved) {
+            resolved = true;
+            reject(new Error(`Wyoming Whisper connection error: ${err.message}`));
+          }
+        });
+
+        // Wyoming STT flow: transcribe -> audio-start -> audio-chunk -> audio-stop
+        sendMessage("transcribe", this.language ? { language: this.language } : {});
+        sendMessage("audio-start", { rate, width, channels });
+        sendMessage("audio-chunk", { rate, width, channels }, audioBuffer);
+        sendMessage("audio-stop", {});
+      });
+
+      socket.setTimeout(this.connectTimeoutMs, () => {
+        if (!resolved) {
+          resolved = true;
+          socket.destroy();
+          reject(new Error(`Wyoming Whisper connection timeout (${this.host}:${this.port})`));
+        }
+      });
+
+      socket.on("error", (err) => {
+        if (!resolved) {
+          resolved = true;
+          reject(new Error(`Wyoming Whisper error: ${err.message}`));
+        }
+      });
+    });
+  }
+}
+
+/**
  * Create STT provider based on config
  */
 export function createSTTProvider(config: DiscordVoiceConfig): STTProvider {
@@ -337,6 +447,8 @@ export function createSTTProvider(config: DiscordVoiceConfig): STTProvider {
       return new DeepgramSTT(config);
     case "local-whisper":
       return new LocalWhisperSTT(config);
+    case "wyoming-whisper":
+      return new WyomingWhisperSTT(config);
     case "gpt4o-mini":
     case "gpt4o-transcribe":
     case "gpt4o-transcribe-diarize":

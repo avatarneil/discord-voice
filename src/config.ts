@@ -11,7 +11,7 @@ export interface VoiceCallTtsConfig {
 
 export interface DiscordVoiceConfig {
   enabled: boolean;
-  sttProvider: "whisper" | "gpt4o-mini" | "gpt4o-transcribe" | "gpt4o-transcribe-diarize" | "deepgram" | "local-whisper";
+  sttProvider: "whisper" | "gpt4o-mini" | "gpt4o-transcribe" | "gpt4o-transcribe-diarize" | "deepgram" | "local-whisper" | "wyoming-whisper";
   streamingSTT: boolean; // Use streaming STT (Deepgram only) for lower latency
   ttsProvider: "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge";
   ttsVoice: string;
@@ -79,6 +79,14 @@ export interface DiscordVoiceConfig {
   localWhisper?: {
     model?: string; // e.g., "Xenova/whisper-tiny.en"
     quantized?: boolean;
+  };
+  /** Wyoming Faster Whisper (remote STT over TCP, e.g. wyoming-faster-whisper) */
+  wyomingWhisper?: {
+    host?: string;   // default: 127.0.0.1
+    port?: number;   // default: 10300
+    uri?: string;    // alternative: "host:port" or "tcp://host:port"
+    language?: string; // e.g. "de", "en"
+    connectTimeoutMs?: number;
   };
   kokoro?: {
     modelId?: string;
@@ -264,7 +272,9 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
               ? "gpt4o-mini"
               : obj.sttProvider === "local-whisper"
                 ? "local-whisper"
-                : "whisper",
+                : obj.sttProvider === "wyoming-whisper"
+                  ? "wyoming-whisper"
+                  : "whisper",
     streamingSTT: typeof obj.streamingSTT === "boolean" ? obj.streamingSTT : DEFAULT_CONFIG.streamingSTT,
     ttsProvider: (["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge"].includes(obj.ttsProvider as string)
       ? obj.ttsProvider
@@ -378,6 +388,30 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
                 : true,
           }
         : undefined,
+    wyomingWhisper: (() => {
+      const ww = obj.wyomingWhisper && typeof obj.wyomingWhisper === "object" ? (obj.wyomingWhisper as Record<string, unknown>) : null;
+      if (!ww) return undefined;
+      const uriStr = typeof ww.uri === "string" ? ww.uri.trim() : "";
+      if (uriStr) {
+        const m = uriStr.match(/^(?:tcp:\/\/)?([^:]+):(\d+)$/);
+        if (m) {
+          return {
+            host: m[1].trim(),
+            port: parseInt(m[2], 10),
+            language: typeof ww.language === "string" && ww.language.trim() ? (ww.language as string).trim() : undefined,
+            connectTimeoutMs: typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? (ww.connectTimeoutMs as number) : 10000,
+          };
+        }
+      }
+      const host = typeof ww.host === "string" && ww.host.trim() ? (ww.host as string).trim() : "127.0.0.1";
+      const port = typeof ww.port === "number" && ww.port > 0 && ww.port <= 65535 ? (ww.port as number) : 10300;
+      return {
+        host,
+        port,
+        language: typeof ww.language === "string" && ww.language.trim() ? (ww.language as string).trim() : undefined,
+        connectTimeoutMs: typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? (ww.connectTimeoutMs as number) : 10000,
+      };
+    })(),
     kokoro:
       obj.kokoro && typeof obj.kokoro === "object"
         ? {

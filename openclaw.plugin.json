@@ -12,9 +12,9 @@
       },
       "sttProvider": {
         "type": "string",
-        "enum": ["whisper", "gpt4o-mini", "gpt4o-transcribe", "gpt4o-transcribe-diarize", "deepgram", "local-whisper"],
+        "enum": ["whisper", "gpt4o-mini", "gpt4o-transcribe", "gpt4o-transcribe-diarize", "deepgram", "local-whisper", "wyoming-whisper"],
         "default": "whisper",
-        "description": "OpenAI: whisper, gpt4o-mini, gpt4o-transcribe, gpt4o-transcribe-diarize; or deepgram"
+        "description": "whisper, gpt4o-*, deepgram, local-whisper, or wyoming-whisper (remote Wyoming Faster Whisper)"
       },
       "streamingSTT": {
         "type": "boolean",
@@ -157,6 +157,17 @@
           "model": { "type": "string", "default": "nova-2" },
           "ttsModel": { "type": "string", "default": "aura-asteria-en", "description": "TTS model: aura-asteria-en, aura-2-thalia-en, etc." }
         }
+      },
+      "wyomingWhisper": {
+        "type": "object",
+        "properties": {
+          "host": { "type": "string", "default": "127.0.0.1", "description": "Wyoming server host" },
+          "port": { "type": "number", "default": 10300, "description": "Wyoming server port" },
+          "uri": { "type": "string", "description": "Alternative: host:port or tcp://host:port" },
+          "language": { "type": "string", "description": "Language hint (e.g. de, en)" },
+          "connectTimeoutMs": { "type": "number", "default": 10000 }
+        },
+        "description": "Wyoming Faster Whisper (remote STT over TCP)"
       }
     }
   },
@@ -167,7 +178,7 @@
     },
 "sttProvider": {
         "label": "Speech-to-Text Provider",
-        "help": "whisper, gpt4o-mini, gpt4o-transcribe, gpt4o-transcribe-diarize (OpenAI), or deepgram"
+        "help": "whisper, gpt4o-mini, deepgram, local-whisper, or wyoming-whisper (remote)"
       },
     "ttsProvider": {
       "label": "Text-to-Speech Provider",
