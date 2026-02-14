@@ -9,6 +9,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { VoiceCallTtsConfig } from "./config.js";
@@ -121,6 +122,34 @@ function resolveOpenClawRoot(): string {
     if (found) {
       coreRootCache = found;
       return found;
+    }
+  }
+
+  // Fallback: resolve via require (plugin runs inside OpenClaw gateway process)
+  const resolvePaths: string[] = [
+    process.cwd(),
+    path.dirname(fileURLToPath(import.meta.url)),
+  ];
+  if (process.argv[1]) {
+    const scriptDir = path.dirname(process.argv[1]);
+    resolvePaths.push(scriptDir);
+    resolvePaths.push(path.dirname(scriptDir)); // parent (e.g. dist -> pkg root)
+  }
+  const stateDir = process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME;
+  if (stateDir) resolvePaths.push(stateDir);
+
+  const require = createRequire(import.meta.url);
+  for (const dir of resolvePaths) {
+    if (!dir) continue;
+    try {
+      const pkgPath = require.resolve("openclaw/package.json", { paths: [dir] });
+      const found = path.dirname(pkgPath);
+      if (fs.existsSync(path.join(found, "dist", "extensionAPI.js"))) {
+        coreRootCache = found;
+        return found;
+      }
+    } catch {
+      // ignore
     }
   }
 

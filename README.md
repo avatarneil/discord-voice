@@ -307,6 +307,14 @@ If the connection drops, you'll see logs like:
 
 ## Troubleshooting
 
+### "Unable to resolve OpenClaw root"
+If you see this when processing voice input, set `OPENCLAW_ROOT` to the OpenClaw package directory before starting the gateway:
+```bash
+export OPENCLAW_ROOT=/path/to/openclaw   # e.g. node_modules/openclaw or the OpenClaw repo root
+openclaw gateway start
+```
+The path must contain `dist/extensionAPI.js`.
+
 ### "Discord client not available"
 Ensure the Discord channel is configured and the bot is connected before using voice.
 
@@ -336,6 +344,7 @@ DEBUG=discord-voice clawdbot gateway start
 
 | Variable | Description |
 |----------|-------------|
+| `OPENCLAW_ROOT` | OpenClaw package root (if auto-detection fails) |
 | `OPENAI_API_KEY` | OpenAI API key (Whisper + TTS) |
 | `ELEVENLABS_API_KEY` | ElevenLabs API key |
 | `DEEPGRAM_API_KEY` | Deepgram API key |
