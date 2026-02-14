@@ -423,7 +423,7 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
             host: m[1].trim(),
             port: parseInt(m[2], 10),
             language: typeof ww.language === "string" && ww.language.trim() ? (ww.language as string).trim() : undefined,
-            connectTimeoutMs: typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? (ww.connectTimeoutMs as number) : 60000,
+            connectTimeoutMs: typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? (ww.connectTimeoutMs as number) : 10000,
           };
         }
       }
@@ -433,7 +433,7 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
         host,
         port,
         language: typeof ww.language === "string" && ww.language.trim() ? (ww.language as string).trim() : undefined,
-        connectTimeoutMs: typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? (ww.connectTimeoutMs as number) : 60000,
+        connectTimeoutMs: typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? (ww.connectTimeoutMs as number) : 10000,
       };
     })(),
     kokoro:

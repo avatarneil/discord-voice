@@ -175,7 +175,7 @@
           "port": { "type": "number", "default": 10300, "description": "Wyoming server port" },
           "uri": { "type": "string", "description": "Alternative: host:port or tcp://host:port" },
           "language": { "type": "string", "description": "Language hint (e.g. de, en)" },
-          "connectTimeoutMs": { "type": "number", "default": 60000, "description": "Timeout incl. processing (faster-whisper can take 15–30s)" }
+          "connectTimeoutMs": { "type": "number", "default": 10000, "description": "Timeout incl. processing" }
         },
         "description": "Wyoming Faster Whisper (remote STT over TCP)"
       }

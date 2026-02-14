@@ -347,7 +347,7 @@ export class WyomingWhisperSTT implements STTProvider {
     this.host = ww.host ?? "127.0.0.1";
     this.port = ww.port ?? 10300;
     this.language = typeof ww.language === "string" && ww.language.trim() ? ww.language.trim() : undefined;
-    this.connectTimeoutMs = typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? ww.connectTimeoutMs : 60000;
+    this.connectTimeoutMs = typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? ww.connectTimeoutMs : 10000;
   }
 
   async transcribe(audioBuffer: Buffer, sampleRate: number): Promise<STTResult> {
@@ -380,28 +380,65 @@ export class WyomingWhisperSTT implements STTProvider {
           if (payload && payloadLen > 0) socket.write(payload);
         };
 
+        let rawBuffer = Buffer.alloc(0);
+        let state: "header" | "data" | "payload" = "header";
+        let dataLength = 0;
+        let payloadLength = 0;
+        let lastHeader: { type: string } | null = null;
+
+        const processEvent = (h: { type: string }, data: { text?: string }) => {
+          if (h.type === "transcript" && data.text != null) {
+            transcriptText = data.text;
+            finish(transcriptText);
+          } else if (h.type === "transcript-chunk" && data.text != null) {
+            transcriptText += data.text;
+          } else if (h.type === "transcript-stop") {
+            finish(transcriptText);
+          }
+        };
+
         socket.on("data", (chunk: Buffer) => {
-          lineBuffer += chunk.toString("utf-8");
-          let idx: number;
-          while ((idx = lineBuffer.indexOf("\n")) !== -1) {
-            const line = lineBuffer.slice(0, idx);
-            lineBuffer = lineBuffer.slice(idx + 1);
-            try {
-              const msg = JSON.parse(line) as { type: string; data?: { text?: string } };
-              if (msg.type === "transcript" && msg.data?.text != null) {
-                transcriptText = msg.data.text;
-                finish(transcriptText);
-                return;
+          rawBuffer = Buffer.concat([rawBuffer, chunk]);
+          while (rawBuffer.length > 0) {
+            if (state === "header") {
+              const idx = rawBuffer.indexOf(0x0a);
+              if (idx === -1) break;
+              const line = rawBuffer.slice(0, idx).toString("utf-8");
+              rawBuffer = rawBuffer.slice(idx + 1);
+              try {
+                const h = JSON.parse(line) as { type: string; data_length?: number; payload_length?: number };
+                lastHeader = h;
+                dataLength = h.data_length ?? 0;
+                payloadLength = h.payload_length ?? 0;
+                state = dataLength > 0 ? "data" : payloadLength > 0 ? "payload" : "header";
+                if (state === "header") {
+                  processEvent(h, {});
+                  if (resolved) return;
+                }
+              } catch {
+                break;
               }
-              if (msg.type === "transcript-chunk" && msg.data?.text != null) {
-                transcriptText += msg.data.text;
+            }
+            if (state === "data") {
+              if (rawBuffer.length < dataLength) break;
+              const dataBytes = rawBuffer.slice(0, dataLength);
+              rawBuffer = rawBuffer.slice(dataLength);
+              try {
+                const data = JSON.parse(dataBytes.toString("utf-8")) as { text?: string };
+                processEvent(lastHeader!, data);
+                if (resolved) return;
+              } catch {
+                // skip malformed data
               }
-              if (msg.type === "transcript-stop") {
-                finish(transcriptText);
-                return;
-              }
-            } catch {
-              // skip malformed lines
+              dataLength = 0;
+              state = payloadLength > 0 ? "payload" : "header";
+              lastHeader = null;
+            }
+            if (state === "payload") {
+              if (rawBuffer.length < payloadLength) break;
+              rawBuffer = rawBuffer.slice(payloadLength);
+              payloadLength = 0;
+              state = "header";
             }
           }
         });
