@@ -31,13 +31,30 @@ import type {
 import { Readable, PassThrough } from "stream";
 import { pipeline } from "stream/promises";
 import * as prism from "prism-media";
+import { WaveFile } from "wavefile";
 
 import type { DiscordVoiceConfig } from "./config.js";
+import type { TTSResult } from "./tts.js";
 import { getVadThreshold } from "./config.js";
 
 import { SPEAK_COOLDOWN_VAD_MS, SPEAK_COOLDOWN_PROCESSING_MS, getRmsThreshold } from "./constants.js";
 import { createSTTProvider, type STTProvider } from "./stt.js";
 import { createTTSProvider, type TTSProvider } from "./tts.js";
+
+/** Create Discord audio resource from TTS result; PCM is converted to WAV for playback */
+function createResourceFromTTSResult(result: TTSResult): ReturnType<typeof createAudioResource> {
+  if (result.format === "opus") {
+    return createAudioResource(Readable.from(result.audioBuffer), {
+      inputType: StreamType.OggOpus,
+    });
+  }
+  if (result.format === "pcm") {
+    const wav = new WaveFile();
+    wav.fromScratch(1, result.sampleRate, "16", result.audioBuffer);
+    return createAudioResource(Readable.from(Buffer.from(wav.toBuffer())));
+  }
+  return createAudioResource(Readable.from(result.audioBuffer));
+}
 
 /** Detect quota/rate-limit errors that warrant trying a fallback TTS provider */
 function isRetryableTtsError(error: unknown): boolean {
@@ -733,12 +750,7 @@ export class VoiceConnectionManager {
 
     // Batch
     const ttsResult = await fallbackTts.synthesize(text);
-    if (ttsResult.format === "opus") {
-      return createAudioResource(Readable.from(ttsResult.audioBuffer), {
-        inputType: StreamType.OggOpus,
-      });
-    }
-    return createAudioResource(Readable.from(ttsResult.audioBuffer));
+    return createResourceFromTTSResult(ttsResult);
   }
 
   /**
@@ -822,13 +834,7 @@ export class VoiceConnectionManager {
       if (!resource && this.ttsProvider) {
         try {
           const ttsResult = await this.ttsProvider.synthesize(text);
-          if (ttsResult.format === "opus") {
-            resource = createAudioResource(Readable.from(ttsResult.audioBuffer), {
-              inputType: StreamType.OggOpus,
-            });
-          } else {
-            resource = createAudioResource(Readable.from(ttsResult.audioBuffer));
-          }
+          resource = createResourceFromTTSResult(ttsResult);
           this.logger.debug?.(`[discord-voice] Using buffered TTS`);
         } catch (batchError) {
           // Primary failed – try fallback if configured and error is retryable
