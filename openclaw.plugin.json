@@ -58,6 +58,11 @@
         "default": true,
         "description": "Inject TTS hint: true = default 'no emojis' text, false = off, string = custom text"
       },
+      "ttsFallbackProvider": {
+        "type": "string",
+        "enum": ["openai", "elevenlabs", "kokoro"],
+        "description": "Fallback TTS when primary fails (quota/rate limit). E.g. kokoro for free local fallback"
+      },
       "allowedUsers": {
         "type": "array",
         "items": { "type": "string" },

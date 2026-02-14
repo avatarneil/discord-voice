@@ -15,6 +15,8 @@ export interface DiscordVoiceConfig {
   streamingSTT: boolean; // Use streaming STT (Deepgram only) for lower latency
   ttsProvider: "openai" | "elevenlabs" | "kokoro";
   ttsVoice: string;
+  /** Fallback TTS provider when primary fails (quota, rate limit). E.g. "kokoro" for free local fallback. */
+  ttsFallbackProvider?: "openai" | "elevenlabs" | "kokoro";
   vadSensitivity: "low" | "medium" | "high";
   bargeIn: boolean; // Stop speaking when user starts talking
   allowedUsers: string[];
@@ -239,6 +241,14 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
       ? obj.ttsProvider
       : ttsProviderRaw) as "openai" | "elevenlabs" | "kokoro",
     ttsVoice,
+    ttsFallbackProvider: (() => {
+      const primary = (["openai", "elevenlabs", "kokoro"].includes(obj.ttsProvider as string)
+        ? obj.ttsProvider
+        : ttsProviderRaw) as "openai" | "elevenlabs" | "kokoro";
+      const fb = obj.ttsFallbackProvider;
+      if (!["openai", "elevenlabs", "kokoro"].includes(fb as string)) return undefined;
+      return fb === primary ? undefined : (fb as "openai" | "elevenlabs" | "kokoro");
+    })(),
     vadSensitivity: ["low", "medium", "high"].includes(obj.vadSensitivity as string)
       ? (obj.vadSensitivity as "low" | "medium" | "high")
       : DEFAULT_CONFIG.vadSensitivity,

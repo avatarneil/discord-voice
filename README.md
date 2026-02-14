@@ -132,6 +132,7 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
 | `openclawRoot` | string | `undefined` | OpenClaw package root if auto-detection fails |
 | `thinkingSound` | object | see [Thinking Sound](#thinking-sound) | Sound played while processing |
 | `noEmojiHint` | boolean \| string | `true` | Inject TTS hint: `true` = default text, `false` = off, `string` = custom text |
+| `ttsFallbackProvider` | string | `undefined` | Fallback when primary fails (quota/rate limit): `"openai"`, `"elevenlabs"`, or `"kokoro"` (free, local) |
 
 ### Fallbacks from Main OpenClaw Config
 
@@ -203,9 +204,9 @@ No API key required. Runs locally using Xenova/Transformers.
 }
 ```
 
-#### Kokoro (Local TTS)
+#### Kokoro (Local TTS) – Free
 
-No API key required. Runs locally on CPU.
+No API key required. Runs locally on CPU. Use as primary or as `ttsFallbackProvider` when ElevenLabs/OpenAI hit quota limits.
 
 ```json5
 {
@@ -215,6 +216,18 @@ No API key required. Runs locally on CPU.
     modelId: "onnx-community/Kokoro-82M-v1.0-ONNX", // Optional
     dtype: "fp32", // Optional: "fp32", "q8", "q4"
   },
+}
+```
+
+#### TTS Fallback (quota / rate limit)
+
+When the primary TTS fails with quota exceeded or rate limit, a fallback provider can be used:
+
+```json5
+{
+  ttsProvider: "elevenlabs",
+  ttsFallbackProvider: "kokoro",  // Free local fallback when ElevenLabs quota is exceeded
+  elevenlabs: { apiKey: "...", voiceId: "...", modelId: "turbo" },
 }
 ```
 
