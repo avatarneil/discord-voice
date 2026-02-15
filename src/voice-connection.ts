@@ -137,6 +137,8 @@ export interface VoiceSession {
   fallbackTtsProvider?: "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge";
   /** Fallback STT provider to use for rest of session (set after primary fails) */
   fallbackSttProvider?: "whisper" | "gpt4o-mini" | "gpt4o-transcribe" | "gpt4o-transcribe-diarize" | "deepgram" | "local-whisper" | "wyoming-whisper";
+  /** Set when agent used discord_voice speak tool – skip speaking returned text to avoid duplicate */
+  spokeViaToolThisRun?: boolean;
 }
 
 export class VoiceConnectionManager {
@@ -166,6 +168,18 @@ export class VoiceConnectionManager {
     this.config = config;
     this.logger = logger;
     this.onTranscript = onTranscript;
+  }
+
+  /**
+   * Mark that the agent spoke via discord_voice tool during this transcript run.
+   * processRecording will skip speaking the returned text to avoid duplicate playback.
+   */
+  markSpokeViaTool(guildId: string): void {
+    const session = this.sessions.get(guildId);
+    if (session) {
+      session.spokeViaToolThisRun = true;
+      this.logger.debug?.("[discord-voice] Agent spoke via discord_voice tool, will skip final speak");
+    }
   }
 
   /**
@@ -693,6 +707,7 @@ export class VoiceConnectionManager {
 
     // Set processing lock AFTER passing all filters
     session.processing = true;
+    session.spokeViaToolThisRun = false;
 
     this.logger.info(`[discord-voice] Processing ${Math.round(durationMs)}ms of audio (RMS: ${Math.round(rms)}) from user ${userId}`);
 
@@ -788,6 +803,13 @@ export class VoiceConnectionManager {
         return;
       }
 
+      // Skip if agent already spoke via discord_voice tool (avoids duplicate playback)
+      if (session.spokeViaToolThisRun) {
+        this.logger.debug?.("[discord-voice] Skipping speak – agent already spoke via discord_voice tool");
+        session.processing = false;
+        return;
+      }
+
       // Ensure main player is subscribed before speaking
       session.connection.subscribe(session.player);
       
@@ -849,6 +871,15 @@ export class VoiceConnectionManager {
     const session = this.sessions.get(guildId);
     if (!session) {
       throw new Error("Not connected to voice channel");
+    }
+
+    // If thinking sound is playing (e.g. agent called discord_voice speak tool during run),
+    // stop it and re-subscribe to main player so our audio is actually heard
+    if (session.thinkingPlayer && session.thinkingPlayer.state.status !== AudioPlayerStatus.Idle) {
+      session.thinkingPlayer.removeAllListeners();
+      session.thinkingPlayer.stop(true);
+      session.thinkingPlayer = undefined;
+      session.connection.subscribe(session.player);
     }
 
     // Strip emojis before TTS when noEmojiHint is set (avoids Kokoro/others reading them aloud)

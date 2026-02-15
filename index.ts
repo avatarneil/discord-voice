@@ -225,7 +225,7 @@ const discordVoicePlugin = {
             : typeof cfg.noEmojiHint === "string"
               ? ` ${cfg.noEmojiHint}`
               : ` ${DEFAULT_NO_EMOJI_HINT}`;
-        const extraSystemPrompt = `You are ${agentName}, speaking in a Discord voice channel. Keep responses brief and conversational (1-2 sentences max). Be natural and friendly.${noEmojiPart} You have access to all your normal tools and skills. The user's Discord ID is ${userId}.`;
+        const extraSystemPrompt = `You are ${agentName}, speaking in a Discord voice channel. Keep responses brief and conversational (1-2 sentences max). Be natural and friendly.${noEmojiPart} You have access to all your normal tools and skills. The user's Discord ID is ${userId}. Your reply will be read aloud automatically—do not use the discord_voice speak tool to respond; just return your reply as text.`;
 
         const timeoutMs = deps.resolveAgentTimeoutMs({ cfg: coreConfig });
         const runId = `discord-voice:${guildId}:${Date.now()}`;
@@ -442,6 +442,7 @@ const discordVoicePlugin = {
                 }
                 guildId = sessions[0].guildId;
               }
+              vm.markSpokeViaTool(guildId);
               await vm.speak(guildId, p.text);
               return json({ spoken: true });
             }
