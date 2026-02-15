@@ -139,6 +139,9 @@ export interface VoiceSession {
   fallbackSttProvider?: "whisper" | "gpt4o-mini" | "gpt4o-transcribe" | "gpt4o-transcribe-diarize" | "deepgram" | "local-whisper" | "wyoming-whisper";
   /** Set when agent used discord_voice speak tool – skip speaking returned text to avoid duplicate */
   spokeViaToolThisRun?: boolean;
+  /** Dedupe: skip processing same transcript within this window (ms) */
+  lastProcessedTranscript?: string;
+  lastProcessedTranscriptAt?: number;
 }
 
 export class VoiceConnectionManager {
@@ -506,8 +509,15 @@ export class VoiceConnectionManager {
 
       state.lastActivityMs = Date.now();
 
+      // Clear previous timer – multiple "end" events must not spawn multiple processRecording calls
+      if (state.silenceTimer) {
+        clearTimeout(state.silenceTimer);
+        state.silenceTimer = undefined;
+      }
+
       // Set silence timer to process the recording
       state.silenceTimer = setTimeout(async () => {
+        state.silenceTimer = undefined;
         if (state.isRecording) {
           const chunksToProcess = [...state.chunks];
           state.isRecording = false;
@@ -780,6 +790,22 @@ export class VoiceConnectionManager {
         return;
       }
 
+      // Dedupe: skip if same transcript was just processed (e.g. duplicate "end" events, gateway relay)
+      const trimmed = transcribedText.trim();
+      const now = Date.now();
+      const dedupeWindowMs = 5000;
+      if (
+        session.lastProcessedTranscript === trimmed &&
+        session.lastProcessedTranscriptAt != null &&
+        now - session.lastProcessedTranscriptAt < dedupeWindowMs
+      ) {
+        this.logger.debug?.(`[discord-voice] Skipping duplicate transcript (same text within ${dedupeWindowMs}ms)`);
+        session.processing = false;
+        return;
+      }
+      session.lastProcessedTranscript = trimmed;
+      session.lastProcessedTranscriptAt = now;
+
       this.logger.info(`[discord-voice] Transcribed: "${transcribedText}"`);
 
       // Play looping thinking sound while processing (if enabled)
@@ -804,7 +830,9 @@ export class VoiceConnectionManager {
       }
 
       // Skip if agent already spoke via discord_voice tool (avoids duplicate playback)
-      if (session.spokeViaToolThisRun) {
+      // Use current session from map: agent's auto-join may have replaced session during run
+      const currentSession = this.sessions.get(session.guildId) ?? session;
+      if (currentSession.spokeViaToolThisRun) {
         this.logger.debug?.("[discord-voice] Skipping speak – agent already spoke via discord_voice tool");
         session.processing = false;
         return;
