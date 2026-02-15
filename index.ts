@@ -87,6 +87,9 @@ const VoiceToolSchema = Type.Union([
   }),
 ]);
 
+/** Singleton: prevent duplicate init when plugin is loaded via both openclaw.extensions and clawdbot.extensions */
+let discordVoiceRegistered = false;
+
 const discordVoicePlugin = {
   id: "discord-voice",
   name: "Discord Voice",
@@ -99,12 +102,21 @@ const discordVoicePlugin = {
   },
 
   register(api: PluginApi) {
+    if (discordVoiceRegistered) {
+      api.logger.warn(
+        "[discord-voice] Plugin already registered (likely loaded via both openclaw and clawdbot extensions). Skipping duplicate init to prevent double processing."
+      );
+      return;
+    }
+    discordVoiceRegistered = true;
+
     const cfg = parseConfig(api.pluginConfig, api.config as Record<string, unknown>);
     let voiceManager: VoiceConnectionManager | null = null;
     let discordClient: Client | null = null;
     let clientReady = false;
 
     if (!cfg.enabled) {
+      discordVoiceRegistered = false;
       api.logger.info("[discord-voice] Plugin disabled");
       return;
     }
@@ -114,6 +126,7 @@ const discordVoicePlugin = {
     const discordToken = mainConfig?.channels?.discord?.token || mainConfig?.discord?.token;
     
     if (!discordToken) {
+      discordVoiceRegistered = false;
       api.logger.error("[discord-voice] No Discord token found in config. Plugin requires discord.token to be configured.");
       return;
     }
@@ -551,6 +564,7 @@ const discordVoicePlugin = {
           await voiceManager.destroy();
           voiceManager = null;
         }
+        discordVoiceRegistered = false;
         api.logger.info("[discord-voice] Service stopped");
       },
     });
