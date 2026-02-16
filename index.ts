@@ -16,7 +16,7 @@ import crypto from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { Client, GatewayIntentBits, type VoiceBasedChannel } from "discord.js";
 
-import { parseConfig, getAvailableModels, DEFAULT_NO_EMOJI_HINT, type DiscordVoiceConfig } from "./src/config.js";
+import { parseConfig, getAvailableModels, DEFAULT_NO_EMOJI_HINT, sanitizeNoEmojiHint, type DiscordVoiceConfig } from "./src/config.js";
 import { VoiceConnectionManager } from "./src/voice-connection.js";
 import { loadCoreAgentDeps, type CoreConfig } from "./src/core-bridge.js";
 
@@ -271,15 +271,17 @@ const discordVoicePlugin = {
           | "medium"
           | "high";
 
-        // Resolve agent identity
+        // Resolve agent identity — sanitize name to prevent prompt injection via config
         const identity = deps.resolveAgentIdentity(coreConfig, agentId);
-        const agentName = identity?.name?.trim() || "assistant";
+        const rawName = identity?.name?.trim() || "assistant";
+        // eslint-disable-next-line no-control-regex
+        const agentName = rawName.replace(/[\u0000-\u001F\u007F]/g, "").slice(0, 100) || "assistant";
 
         const noEmojiPart =
           cfg.noEmojiHint === false
             ? ""
             : typeof cfg.noEmojiHint === "string"
-              ? ` ${cfg.noEmojiHint}`
+              ? ` ${sanitizeNoEmojiHint(cfg.noEmojiHint)}`
               : ` ${DEFAULT_NO_EMOJI_HINT}`;
         // Sanitize userId to prevent prompt injection (must be a Discord snowflake)
         const safeUserId = DISCORD_SNOWFLAKE_RE.test(userId) ? userId : "unknown";
