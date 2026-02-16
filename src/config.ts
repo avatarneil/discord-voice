@@ -385,6 +385,40 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
   };
 }
 
+// ── Security: model / ID validation helpers ──────────────────────────
+
+/** Allowed prefixes for local Whisper model IDs (prevents loading arbitrary HuggingFace models) */
+const ALLOWED_WHISPER_PREFIXES = ["Xenova/whisper-", "openai/whisper-", "onnx-community/whisper-"] as const;
+
+/** Allowed prefixes for Kokoro model IDs */
+const ALLOWED_KOKORO_PREFIXES = ["onnx-community/Kokoro-", "kokoro-"] as const;
+
+/** Known Deepgram STT model families */
+const KNOWN_DEEPGRAM_MODELS = ["nova-2", "nova-3", "nova", "enhanced", "base", "whisper"] as const;
+
+/** ElevenLabs voice IDs are alphanumeric */
+const ELEVENLABS_VOICE_ID_RE = /^[a-zA-Z0-9]+$/;
+
+export function validateWhisperModel(model: string): string {
+  if (ALLOWED_WHISPER_PREFIXES.some((p) => model.startsWith(p))) return model;
+  return "Xenova/whisper-tiny.en"; // safe default
+}
+
+export function validateKokoroModel(model: string): string {
+  if (ALLOWED_KOKORO_PREFIXES.some((p) => model.startsWith(p))) return model;
+  return "onnx-community/Kokoro-82M-v1.0-ONNX"; // safe default
+}
+
+export function validateDeepgramModel(model: string): string {
+  if (KNOWN_DEEPGRAM_MODELS.some((m) => model === m || model.startsWith(`${m}-`))) return model;
+  return "nova-2"; // safe default
+}
+
+export function validateElevenLabsVoiceId(voiceId: string): string {
+  if (ELEVENLABS_VOICE_ID_RE.test(voiceId)) return voiceId;
+  return "21m00Tcm4TlvDq8ikWAM"; // default: Rachel
+}
+
 /**
  * Get VAD threshold based on sensitivity setting
  */

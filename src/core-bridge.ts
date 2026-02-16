@@ -157,12 +157,31 @@ function resolveOpenClawRoot(overrideRoot?: string): string {
 }
 
 async function importCoreExtensionAPI(overrideRoot?: string): Promise<CoreAgentDeps> {
-  const distPath = path.join(resolveOpenClawRoot(overrideRoot), "dist", "extensionAPI.js");
+  const root = resolveOpenClawRoot(overrideRoot);
+  const distPath = path.join(root, "dist", "extensionAPI.js");
   if (!fs.existsSync(distPath)) {
     throw new Error(
       `Missing extension API at ${distPath}. Run \`pnpm build\` in OpenClaw or install the official openclaw package.`,
     );
   }
+
+  // Verify the resolved path belongs to an actual openclaw package (prevents loading arbitrary code)
+  const pkgJsonPath = path.join(root, "package.json");
+  if (!fs.existsSync(pkgJsonPath)) {
+    throw new Error(`No package.json found at ${root} — cannot verify openclaw package integrity.`);
+  }
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8")) as { name?: string };
+    if (pkg.name !== "openclaw") {
+      throw new Error(`Package at ${root} is "${pkg.name}", expected "openclaw".`);
+    }
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error(`Malformed package.json at ${pkgJsonPath}`);
+    }
+    throw err;
+  }
+
   return (await import(pathToFileURL(distPath).href)) as CoreAgentDeps;
 }
 
