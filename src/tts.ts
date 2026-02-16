@@ -3,7 +3,13 @@
  */
 
 import type { DiscordVoiceConfig } from "./config.js";
+import { validateElevenLabsVoiceId, validateKokoroModel } from "./config.js";
 import { KokoroTTS } from "kokoro-js";
+
+/** Truncate API error bodies to prevent leaking sensitive information in logs */
+function truncateError(text: string, maxLen = 200): string {
+  return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
+}
 
 // Helper type for voice keys since it's not easily accessible
 type KokoroVoice = keyof KokoroTTS["voices"];
@@ -61,7 +67,7 @@ export class OpenAITTS implements TTSProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`OpenAI TTS error: ${response.status} ${error}`);
+      throw new Error(`OpenAI TTS error: ${response.status} ${truncateError(error)}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -83,7 +89,7 @@ export class ElevenLabsTTS implements TTSProvider {
 
   constructor(config: DiscordVoiceConfig) {
     this.apiKey = config.elevenlabs?.apiKey || process.env["ELEVENLABS_API_KEY"] || "";
-    this.voiceId = config.elevenlabs?.voiceId || "21m00Tcm4TlvDq8ikWAM"; // Default: Rachel
+    this.voiceId = validateElevenLabsVoiceId(config.elevenlabs?.voiceId || "21m00Tcm4TlvDq8ikWAM");
     this.modelId = config.elevenlabs?.modelId || "eleven_turbo_v2_5";
 
     if (!this.apiKey) {
@@ -92,7 +98,7 @@ export class ElevenLabsTTS implements TTSProvider {
   }
 
   async synthesize(text: string): Promise<TTSResult> {
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}`, {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.voiceId)}`, {
       method: "POST",
       headers: {
         "xi-api-key": this.apiKey,
@@ -111,7 +117,7 @@ export class ElevenLabsTTS implements TTSProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`ElevenLabs TTS error: ${response.status} ${error}`);
+      throw new Error(`ElevenLabs TTS error: ${response.status} ${truncateError(error)}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -136,7 +142,7 @@ export class KokoroTTSProvider implements TTSProvider {
   private voice: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.modelId = config.kokoro?.modelId || "onnx-community/Kokoro-82M-v1.0-ONNX";
+    this.modelId = validateKokoroModel(config.kokoro?.modelId || "onnx-community/Kokoro-82M-v1.0-ONNX");
     this.dtype = config.kokoro?.dtype || "fp32";
     this.voice = config.kokoro?.voice ?? "af_heart";
   }

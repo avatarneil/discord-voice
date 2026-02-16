@@ -698,7 +698,7 @@ export class VoiceConnectionManager {
         return;
       }
 
-      this.logger.info(`[discord-voice] Transcribed: "${transcribedText}"`);
+      this.logger.debug?.(`[discord-voice] Transcribed (${transcribedText.length} chars)`);
 
       // Play looping thinking sound while processing (if enabled)
       const stopThinking = await this.startThinkingLoop(session);
@@ -923,9 +923,23 @@ export class VoiceConnectionManager {
       const { fileURLToPath } = await import("node:url");
 
       const __dirname = path.dirname(fileURLToPath(import.meta.url));
-      const pluginRoot = path.join(__dirname, "..");
+      const pluginRoot = path.resolve(path.join(__dirname, ".."));
       const pathRaw = ts?.path ?? "assets/thinking.mp3";
-      const thinkingPath = path.isAbsolute(pathRaw) ? pathRaw : path.join(pluginRoot, pathRaw);
+
+      // Security: reject absolute paths and path traversal to prevent arbitrary file reads
+      if (path.isAbsolute(pathRaw)) {
+        this.logger.warn("[discord-voice] Absolute thinking sound paths are not allowed for security reasons");
+        return () => {};
+      }
+      if (pathRaw.includes("..")) {
+        this.logger.warn("[discord-voice] Path traversal in thinking sound path is not allowed");
+        return () => {};
+      }
+      const thinkingPath = path.resolve(path.join(pluginRoot, pathRaw));
+      if (!thinkingPath.startsWith(pluginRoot)) {
+        this.logger.warn("[discord-voice] Thinking sound path resolved outside plugin root");
+        return () => {};
+      }
 
       if (!fs.existsSync(thinkingPath)) {
         return () => {};

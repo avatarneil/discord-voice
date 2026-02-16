@@ -63,6 +63,12 @@ interface PluginApi {
   registerCli(register: (ctx: { program: unknown }) => void, opts?: { commands: string[] }): void;
 }
 
+/** Maximum characters for TTS input to prevent abuse and runaway API costs */
+const MAX_TTS_TEXT_LENGTH = 4000;
+
+/** Discord snowflake IDs are numeric strings (17–20 digits) */
+const DISCORD_SNOWFLAKE_RE = /^\d{17,20}$/;
+
 const VoiceToolSchema = Type.Union([
   Type.Object({
     action: Type.Literal("join"),
@@ -103,6 +109,18 @@ const discordVoicePlugin = {
     if (!cfg.enabled) {
       api.logger.info("[discord-voice] Plugin disabled");
       return;
+    }
+
+    if (process.env["NODE_TLS_REJECT_UNAUTHORIZED"] === "0") {
+      api.logger.warn(
+        "[discord-voice] NODE_TLS_REJECT_UNAUTHORIZED=0 is set — TLS certificate verification is DISABLED. API keys may be exposed to MITM attacks.",
+      );
+    }
+
+    if (cfg.allowedUsers.length === 0) {
+      api.logger.warn(
+        "[discord-voice] No allowedUsers configured — all users in joined channels can interact with the bot and trigger API calls. Set allowedUsers to restrict access.",
+      );
     }
 
     // Get Discord token from main config
@@ -156,7 +174,7 @@ const discordVoicePlugin = {
      * Handle transcribed speech - route to agent and get response
      */
     async function handleTranscript(userId: string, guildId: string, channelId: string, text: string): Promise<string> {
-      api.logger.info(`[discord-voice] Processing transcript from ${userId}: "${text}"`);
+      api.logger.debug?.(`[discord-voice] Processing transcript from user (${text.length} chars)`);
 
       try {
         const deps = await loadCoreAgentDeps(cfg.openclawRoot);
@@ -216,7 +234,9 @@ const discordVoicePlugin = {
             : typeof cfg.noEmojiHint === "string"
               ? ` ${cfg.noEmojiHint}`
               : ` ${DEFAULT_NO_EMOJI_HINT}`;
-        const extraSystemPrompt = `You are ${agentName}, speaking in a Discord voice channel. Keep responses brief and conversational (1-2 sentences max). Be natural and friendly.${noEmojiPart} The user's Discord ID is ${userId}.`;
+        // Sanitize userId to prevent prompt injection (must be a Discord snowflake)
+        const safeUserId = DISCORD_SNOWFLAKE_RE.test(userId) ? userId : "unknown";
+        const extraSystemPrompt = `You are ${agentName}, speaking in a Discord voice channel. Keep responses brief and conversational (1-2 sentences max). Be natural and friendly.${noEmojiPart} The user's Discord ID is ${safeUserId}.`;
 
         const timeoutMs = deps.resolveAgentTimeoutMs({ cfg: coreConfig });
         const runId = `discord-voice:${guildId}:${Date.now()}`;
@@ -338,7 +358,7 @@ const discordVoicePlugin = {
     api.registerGatewayMethod("discord-voice.speak", async ({ params, respond }) => {
       try {
         const p = params as { text?: string; guildId?: string } | null;
-        const text = p?.text;
+        const text = p?.text?.slice(0, MAX_TTS_TEXT_LENGTH);
         let guildId = p?.guildId;
 
         if (!text) {
@@ -427,6 +447,7 @@ const discordVoicePlugin = {
 
             case "speak": {
               if (!p.text) throw new Error("text required");
+              p.text = p.text.slice(0, MAX_TTS_TEXT_LENGTH);
               let guildId = p.guildId;
               if (!guildId) {
                 const sessions = vm.getAllSessions();

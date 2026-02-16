@@ -3,8 +3,14 @@
  */
 
 import type { DiscordVoiceConfig } from "./config.js";
+import { validateWhisperModel, validateDeepgramModel } from "./config.js";
 import { pipeline, env } from "@xenova/transformers";
 import { WaveFile } from "wavefile";
+
+/** Truncate API error bodies to prevent leaking sensitive information in logs */
+function truncateError(text: string, maxLen = 200): string {
+  return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
+}
 
 // Disable local model checks if not using local models, but here we want local
 env.allowLocalModels = true; // Allow loading from local file system
@@ -55,7 +61,7 @@ export class WhisperSTT implements STTProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Whisper API error: ${response.status} ${error}`);
+      throw new Error(`Whisper API error: ${response.status} ${truncateError(error)}`);
     }
 
     const result = (await response.json()) as { text: string; language?: string };
@@ -143,7 +149,7 @@ export class OpenAITranscribeSTT implements STTProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`OpenAI transcribe API error (${this.model}): ${response.status} ${error}`);
+      throw new Error(`OpenAI transcribe API error (${this.model}): ${response.status} ${truncateError(error)}`);
     }
 
     const result = (await response.json()) as {
@@ -170,7 +176,7 @@ export class DeepgramSTT implements STTProvider {
 
   constructor(config: DiscordVoiceConfig) {
     this.apiKey = config.deepgram?.apiKey || process.env["DEEPGRAM_API_KEY"] || "";
-    this.model = config.deepgram?.model || "nova-2";
+    this.model = validateDeepgramModel(config.deepgram?.model || "nova-2");
 
     if (!this.apiKey) {
       throw new Error("Deepgram API key required for Deepgram STT");
@@ -198,7 +204,7 @@ export class DeepgramSTT implements STTProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Deepgram API error: ${response.status} ${error}`);
+      throw new Error(`Deepgram API error: ${response.status} ${truncateError(error)}`);
     }
 
     const result = (await response.json()) as {
@@ -246,7 +252,7 @@ export class LocalWhisperSTT implements STTProvider {
   private static initializationPromise: Promise<void> | null = null;
 
   constructor(config: DiscordVoiceConfig) {
-    this.model = config.localWhisper?.model || "Xenova/whisper-tiny.en";
+    this.model = validateWhisperModel(config.localWhisper?.model || "Xenova/whisper-tiny.en");
     this.quantized = config.localWhisper?.quantized ?? true;
   }
 

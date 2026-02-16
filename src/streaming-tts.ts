@@ -7,6 +7,12 @@
 
 import { Readable } from "node:stream";
 import type { DiscordVoiceConfig } from "./config.js";
+import { validateElevenLabsVoiceId } from "./config.js";
+
+/** Truncate API error bodies to prevent leaking sensitive information in logs */
+function truncateError(text: string, maxLen = 200): string {
+  return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
+}
 
 /** Valid OpenAI TTS voice names (ttsVoice may be from Kokoro/ElevenLabs config) */
 const OPENAI_TTS_VOICES = ["nova", "shimmer", "echo", "onyx", "fable", "alloy", "ash", "sage", "coral"] as const;
@@ -77,7 +83,7 @@ export class OpenAIStreamingTTS implements StreamingTTSProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`OpenAI TTS error: ${response.status} ${error}`);
+      throw new Error(`OpenAI TTS error: ${response.status} ${truncateError(error)}`);
     }
 
     if (!response.body) {
@@ -108,7 +114,7 @@ export class ElevenLabsStreamingTTS implements StreamingTTSProvider {
 
   constructor(config: DiscordVoiceConfig) {
     this.apiKey = config.elevenlabs?.apiKey || process.env["ELEVENLABS_API_KEY"] || "";
-    this.voiceId = config.elevenlabs?.voiceId || "21m00Tcm4TlvDq8ikWAM";
+    this.voiceId = validateElevenLabsVoiceId(config.elevenlabs?.voiceId || "21m00Tcm4TlvDq8ikWAM");
     this.modelId = config.elevenlabs?.modelId || "eleven_turbo_v2_5"; // Turbo model is faster
 
     if (!this.apiKey) {
@@ -122,7 +128,7 @@ export class ElevenLabsStreamingTTS implements StreamingTTSProvider {
 
   async synthesizeStream(text: string): Promise<StreamingTTSResult> {
     // Use the streaming endpoint
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream`, {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.voiceId)}/stream`, {
       method: "POST",
       headers: {
         "xi-api-key": this.apiKey,
@@ -142,7 +148,7 @@ export class ElevenLabsStreamingTTS implements StreamingTTSProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`ElevenLabs TTS error: ${response.status} ${error}`);
+      throw new Error(`ElevenLabs TTS error: ${response.status} ${truncateError(error)}`);
     }
 
     if (!response.body) {

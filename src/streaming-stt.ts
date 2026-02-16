@@ -8,6 +8,7 @@
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
 import type { DiscordVoiceConfig } from "./config.js";
+import { validateDeepgramModel } from "./config.js";
 
 export interface StreamingSTTLogger {
   info(msg: string): void;
@@ -77,7 +78,7 @@ export class DeepgramStreamingSTT extends EventEmitter implements StreamingSTTPr
   ) {
     super();
     this.apiKey = config.deepgram?.apiKey || process.env["DEEPGRAM_API_KEY"] || "";
-    this.model = config.deepgram?.model || "nova-2";
+    this.model = validateDeepgramModel(config.deepgram?.model || "nova-2");
     this.sampleRate = options?.sampleRate ?? 48000;
     this.interimResults = options?.interimResults ?? true;
     this.endpointing = options?.endpointing ?? 300; // 300ms silence detection
