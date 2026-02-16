@@ -21,5 +21,9 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
+.claude/
+
+# Project internals
+REFACTORING.md
 *.swp
 *.swo
