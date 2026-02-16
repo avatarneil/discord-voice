@@ -14,7 +14,7 @@
 
 import crypto from "node:crypto";
 import { Type } from "@sinclair/typebox";
-import { Client, GatewayIntentBits, type VoiceBasedChannel, type GuildMember } from "discord.js";
+import { Client, GatewayIntentBits, type VoiceBasedChannel } from "discord.js";
 
 import { parseConfig, DEFAULT_NO_EMOJI_HINT, type DiscordVoiceConfig } from "./src/config.js";
 import { VoiceConnectionManager } from "./src/voice-connection.js";
@@ -44,27 +44,23 @@ interface PluginApi {
   };
   registerGatewayMethod(
     name: string,
-    handler: (ctx: { params: unknown; respond: (ok: boolean, payload?: unknown) => void }) => void | Promise<void>
+    handler: (ctx: { params: unknown; respond: (ok: boolean, payload?: unknown) => void }) => void | Promise<void>,
   ): void;
   registerTool(tool: {
     name: string;
     label: string;
     description: string;
     parameters: unknown;
-    execute: (toolCallId: string, params: unknown) => Promise<{
+    execute: (
+      toolCallId: string,
+      params: unknown,
+    ) => Promise<{
       content: Array<{ type: string; text: string }>;
       details?: unknown;
     }>;
   }): void;
-  registerService(service: {
-    id: string;
-    start: () => Promise<void> | void;
-    stop: () => Promise<void> | void;
-  }): void;
-  registerCli(
-    register: (ctx: { program: unknown }) => void,
-    opts?: { commands: string[] }
-  ): void;
+  registerService(service: { id: string; start: () => Promise<void> | void; stop: () => Promise<void> | void }): void;
+  registerCli(register: (ctx: { program: unknown }) => void, opts?: { commands: string[] }): void;
 }
 
 const VoiceToolSchema = Type.Union([
@@ -110,34 +106,32 @@ const discordVoicePlugin = {
     }
 
     // Get Discord token from main config
-    const mainConfig = api.config as { discord?: { token?: string }, channels?: { discord?: { token?: string } } };
+    const mainConfig = api.config as { discord?: { token?: string }; channels?: { discord?: { token?: string } } };
     const discordToken = mainConfig?.channels?.discord?.token || mainConfig?.discord?.token;
-    
+
     if (!discordToken) {
-      api.logger.error("[discord-voice] No Discord token found in config. Plugin requires discord.token to be configured.");
+      api.logger.error(
+        "[discord-voice] No Discord token found in config. Plugin requires discord.token to be configured.",
+      );
       return;
     }
 
     // Create our own Discord client with voice intents
     discordClient = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.GuildMessages,
-      ],
+      intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages],
     });
 
     discordClient.once("ready", async () => {
       clientReady = true;
       api.logger.info(`[discord-voice] Discord client ready as ${discordClient?.user?.tag}`);
-      
+
       // Auto-join channel if configured
       if (cfg.autoJoinChannel) {
         try {
           api.logger.info(`[discord-voice] Auto-joining channel ${cfg.autoJoinChannel}`);
           // Wait a moment for everything to initialize
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+
           const channel = await discordClient!.channels.fetch(cfg.autoJoinChannel);
           if (channel && channel.isVoiceBased()) {
             const vm = ensureVoiceManager();
@@ -147,7 +141,9 @@ const discordVoicePlugin = {
             api.logger.warn(`[discord-voice] Auto-join channel ${cfg.autoJoinChannel} is not a voice channel`);
           }
         } catch (error) {
-          api.logger.error(`[discord-voice] Failed to auto-join: ${error instanceof Error ? error.message : String(error)}`);
+          api.logger.error(
+            `[discord-voice] Failed to auto-join: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       }
     });
@@ -159,12 +155,7 @@ const discordVoicePlugin = {
     /**
      * Handle transcribed speech - route to agent and get response
      */
-    async function handleTranscript(
-      userId: string,
-      guildId: string,
-      channelId: string,
-      text: string
-    ): Promise<string> {
+    async function handleTranscript(userId: string, guildId: string, channelId: string, text: string): Promise<string> {
       api.logger.info(`[discord-voice] Processing transcript from ${userId}: "${text}"`);
 
       try {
@@ -176,10 +167,10 @@ const discordVoicePlugin = {
 
         const coreConfig = api.config as CoreConfig;
         const agentId = "main";
-        
+
         // Build session key based on guild
         const sessionKey = `discord:voice:${guildId}`;
-        
+
         // Resolve paths
         const storePath = deps.resolveStorePath(coreConfig.session?.store, { agentId });
         const agentDir = deps.resolveAgentDir(coreConfig, agentId);
@@ -286,9 +277,8 @@ const discordVoicePlugin = {
     // Register Gateway RPC methods
     api.registerGatewayMethod("discord-voice.join", async ({ params, respond }) => {
       try {
-        const p = params as { channelId?: string; guildId?: string } | null;
+        const p = params as { channelId?: string } | null;
         const channelId = p?.channelId;
-        const guildId = p?.guildId;
 
         if (!channelId) {
           respond(false, { error: "channelId required" });
@@ -309,7 +299,7 @@ const discordVoicePlugin = {
 
         const vm = ensureVoiceManager();
         const session = await vm.join(channel as VoiceBasedChannel);
-        
+
         respond(true, {
           joined: true,
           guildId: session.guildId,
@@ -326,15 +316,16 @@ const discordVoicePlugin = {
         let guildId = p?.guildId;
 
         const vm = ensureVoiceManager();
-        
+
         // If no guildId provided, leave all
         if (!guildId) {
           const sessions = vm.getAllSessions();
-          if (sessions.length === 0) {
+          const firstSession = sessions[0];
+          if (!firstSession) {
             respond(true, { left: false, reason: "Not in any voice channel" });
             return;
           }
-          guildId = sessions[0].guildId;
+          guildId = firstSession.guildId;
         }
 
         const left = await vm.leave(guildId);
@@ -356,14 +347,15 @@ const discordVoicePlugin = {
         }
 
         const vm = ensureVoiceManager();
-        
+
         if (!guildId) {
           const sessions = vm.getAllSessions();
-          if (sessions.length === 0) {
+          const firstSession = sessions[0];
+          if (!firstSession) {
             respond(false, { error: "Not in any voice channel" });
             return;
           }
-          guildId = sessions[0].guildId;
+          guildId = firstSession.guildId;
         }
 
         await vm.speak(guildId, text);
@@ -409,12 +401,12 @@ const discordVoicePlugin = {
             case "join": {
               if (!p.channelId) throw new Error("channelId required");
               if (!client) throw new Error("Discord client not available");
-              
+
               const channel = await client.channels.fetch(p.channelId);
               if (!channel || !("guild" in channel) || !channel.isVoiceBased()) {
                 throw new Error("Invalid voice channel");
               }
-              
+
               const session = await vm.join(channel as VoiceBasedChannel);
               return json({ joined: true, guildId: session.guildId, channelId: session.channelId });
             }
@@ -423,10 +415,11 @@ const discordVoicePlugin = {
               let guildId = p.guildId;
               if (!guildId) {
                 const sessions = vm.getAllSessions();
-                if (sessions.length === 0) {
+                const firstSession = sessions[0];
+                if (!firstSession) {
                   return json({ left: false, reason: "Not in any voice channel" });
                 }
-                guildId = sessions[0].guildId;
+                guildId = firstSession.guildId;
               }
               const left = await vm.leave(guildId);
               return json({ left, guildId });
@@ -437,10 +430,11 @@ const discordVoicePlugin = {
               let guildId = p.guildId;
               if (!guildId) {
                 const sessions = vm.getAllSessions();
-                if (sessions.length === 0) {
+                const firstSession = sessions[0];
+                if (!firstSession) {
                   throw new Error("Not in any voice channel");
                 }
-                guildId = sessions[0].guildId;
+                guildId = firstSession.guildId;
               }
               await vm.speak(guildId, p.text);
               return json({ spoken: true });
@@ -468,8 +462,14 @@ const discordVoicePlugin = {
     // Register CLI commands
     api.registerCli(
       ({ program }) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const prog = program as any;
+        interface CliCommand {
+          command(name: string): CliCommand;
+          description(desc: string): CliCommand;
+          argument(name: string, desc: string): CliCommand;
+          option(flags: string, desc: string): CliCommand;
+          action(fn: (...args: never[]) => void | Promise<void>): CliCommand;
+        }
+        const prog = program as CliCommand;
 
         const voiceCmd = prog.command("voice").description("Discord voice channel commands");
 
@@ -506,7 +506,7 @@ const discordVoicePlugin = {
           .action(async (opts: { guild?: string }) => {
             const vm = ensureVoiceManager();
             const guildId = opts.guild || vm.getAllSessions()[0]?.guildId;
-            
+
             if (!guildId) {
               console.log("Not in any voice channel");
               return;
@@ -536,7 +536,7 @@ const discordVoicePlugin = {
             }
           });
       },
-      { commands: ["voice"] }
+      { commands: ["voice"] },
     );
 
     // Register background service

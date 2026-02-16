@@ -27,15 +27,8 @@ export type CoreConfig = {
 type CoreAgentDeps = {
   resolveAgentDir: (cfg: CoreConfig, agentId: string) => string;
   resolveAgentWorkspaceDir: (cfg: CoreConfig, agentId: string) => string;
-  resolveAgentIdentity: (
-    cfg: CoreConfig,
-    agentId: string,
-  ) => { name?: string | null } | null | undefined;
-  resolveThinkingDefault: (params: {
-    cfg: CoreConfig;
-    provider?: string;
-    model?: string;
-  }) => string;
+  resolveAgentIdentity: (cfg: CoreConfig, agentId: string) => { name?: string | null } | null | undefined;
+  resolveThinkingDefault: (params: { cfg: CoreConfig; provider?: string; model?: string }) => string;
   runEmbeddedPiAgent: (params: {
     sessionId: string;
     sessionKey?: string;
@@ -61,15 +54,8 @@ type CoreAgentDeps = {
   ensureAgentWorkspace: (params?: { dir: string }) => Promise<void>;
   resolveStorePath: (store?: string, opts?: { agentId?: string }) => string;
   loadSessionStore: (storePath: string) => Record<string, unknown>;
-  saveSessionStore: (
-    storePath: string,
-    store: Record<string, unknown>,
-  ) => Promise<void>;
-  resolveSessionFilePath: (
-    sessionId: string,
-    entry: unknown,
-    opts?: { agentId?: string },
-  ) => string;
+  saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
+  resolveSessionFilePath: (sessionId: string, entry: unknown, opts?: { agentId?: string }) => string;
   DEFAULT_MODEL: string;
   DEFAULT_PROVIDER: string;
 };
@@ -99,7 +85,7 @@ function findPackageRoot(startDir: string, name: string): string | null {
 function resolveOpenClawRoot(overrideRoot?: string): string {
   if (coreRootCache) return coreRootCache;
 
-  const override = overrideRoot?.trim() || process.env.OPENCLAW_ROOT?.trim();
+  const override = overrideRoot?.trim() || process.env["OPENCLAW_ROOT"]?.trim();
   if (override) {
     coreRootCache = override;
     return override;
@@ -127,7 +113,7 @@ function resolveOpenClawRoot(overrideRoot?: string): string {
   } catch {
     // ignore
   }
-  const stateDir = process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME;
+  const stateDir = process.env["OPENCLAW_STATE_DIR"] || process.env["OPENCLAW_HOME"];
   if (stateDir) {
     candidates.add(stateDir);
     candidates.add(path.dirname(stateDir));
@@ -142,10 +128,7 @@ function resolveOpenClawRoot(overrideRoot?: string): string {
   }
 
   // Fallback: resolve via require (plugin runs inside OpenClaw gateway process)
-  const resolvePaths: string[] = [
-    process.cwd(),
-    path.dirname(fileURLToPath(import.meta.url)),
-  ];
+  const resolvePaths: string[] = [process.cwd(), path.dirname(fileURLToPath(import.meta.url))];
   if (process.argv[1]) {
     const scriptDir = path.dirname(process.argv[1]);
     resolvePaths.push(scriptDir);

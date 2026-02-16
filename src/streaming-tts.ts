@@ -1,11 +1,11 @@
 /**
  * Streaming Text-to-Speech providers
- * 
+ *
  * Streams audio chunks as they arrive from the TTS API,
  * reducing time-to-first-audio significantly.
  */
 
-import { Readable, PassThrough } from "node:stream";
+import { Readable } from "node:stream";
 import type { DiscordVoiceConfig } from "./config.js";
 
 /** Valid OpenAI TTS voice names (ttsVoice may be from Kokoro/ElevenLabs config) */
@@ -23,12 +23,12 @@ export interface StreamingTTSResult {
 }
 
 export interface StreamingTTSProvider {
-  /** 
+  /**
    * Synthesize text to audio stream
    * Returns a readable stream that emits audio chunks as they arrive
    */
   synthesizeStream(text: string): Promise<StreamingTTSResult>;
-  
+
   /**
    * Check if streaming is supported
    */
@@ -37,7 +37,7 @@ export interface StreamingTTSProvider {
 
 /**
  * OpenAI Streaming TTS Provider
- * 
+ *
  * OpenAI TTS supports streaming responses - we can start playing
  * audio before the full response is received.
  */
@@ -47,7 +47,7 @@ export class OpenAIStreamingTTS implements StreamingTTSProvider {
   private voice: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY || "";
+    this.apiKey = config.openai?.apiKey || process.env["OPENAI_API_KEY"] || "";
     this.model = config.openai?.ttsModel || "tts-1";
     this.voice = resolveOpenAIVoice(config.openai?.voice);
 
@@ -85,7 +85,7 @@ export class OpenAIStreamingTTS implements StreamingTTSProvider {
     }
 
     // Convert web ReadableStream to Node.js Readable
-    const nodeStream = Readable.fromWeb(response.body as any);
+    const nodeStream = Readable.fromWeb(response.body as import("node:stream/web").ReadableStream);
 
     return {
       stream: nodeStream,
@@ -97,7 +97,7 @@ export class OpenAIStreamingTTS implements StreamingTTSProvider {
 
 /**
  * ElevenLabs Streaming TTS Provider
- * 
+ *
  * ElevenLabs supports streaming via their streaming endpoint.
  * Audio chunks are returned as they're generated.
  */
@@ -107,7 +107,7 @@ export class ElevenLabsStreamingTTS implements StreamingTTSProvider {
   private modelId: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.elevenlabs?.apiKey || process.env.ELEVENLABS_API_KEY || "";
+    this.apiKey = config.elevenlabs?.apiKey || process.env["ELEVENLABS_API_KEY"] || "";
     this.voiceId = config.elevenlabs?.voiceId || "21m00Tcm4TlvDq8ikWAM";
     this.modelId = config.elevenlabs?.modelId || "eleven_turbo_v2_5"; // Turbo model is faster
 
@@ -122,26 +122,23 @@ export class ElevenLabsStreamingTTS implements StreamingTTSProvider {
 
   async synthesizeStream(text: string): Promise<StreamingTTSResult> {
     // Use the streaming endpoint
-    const response = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": this.apiKey,
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg",
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream`, {
+      method: "POST",
+      headers: {
+        "xi-api-key": this.apiKey,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: this.modelId,
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
         },
-        body: JSON.stringify({
-          text,
-          model_id: this.modelId,
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-          },
-          optimize_streaming_latency: 3, // 0-4, higher = lower latency but quality tradeoff
-        }),
-      }
-    );
+        optimize_streaming_latency: 3, // 0-4, higher = lower latency but quality tradeoff
+      }),
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -153,7 +150,7 @@ export class ElevenLabsStreamingTTS implements StreamingTTSProvider {
     }
 
     // Convert web ReadableStream to Node.js Readable
-    const nodeStream = Readable.fromWeb(response.body as any);
+    const nodeStream = Readable.fromWeb(response.body as import("node:stream/web").ReadableStream);
 
     return {
       stream: nodeStream,
@@ -187,7 +184,7 @@ export function createStreamingTTSProvider(config: DiscordVoiceConfig): Streamin
 export function bufferStreamWithMinimum(
   source: Readable,
   minBytes: number,
-  timeoutMs: number
+  timeoutMs: number,
 ): Promise<{ buffer: Buffer; remaining: Readable }> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -205,7 +202,7 @@ export function bufferStreamWithMinimum(
 
     source.on("data", (chunk: Buffer) => {
       if (resolved) return;
-      
+
       chunks.push(chunk);
       totalBytes += chunk.length;
 

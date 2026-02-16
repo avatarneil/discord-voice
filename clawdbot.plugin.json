@@ -4,12 +4,24 @@
   "description": "Real-time voice conversations in Discord voice channels",
   "requirements": {
     "config": {
-      "discord.token": { "required": true, "description": "Discord bot token (via channels.discord.token or discord.token in main config)" }
+      "discord.token": {
+        "required": true,
+        "description": "Discord bot token (via channels.discord.token or discord.token in main config)"
+      }
     },
     "env": {
-      "OPENAI_API_KEY": { "required": false, "description": "OpenAI API key — needed for whisper STT and openai TTS providers (fallback if not set in plugin config)" },
-      "ELEVENLABS_API_KEY": { "required": false, "description": "ElevenLabs API key — needed for elevenlabs TTS provider (fallback if not set in plugin config)" },
-      "DEEPGRAM_API_KEY": { "required": false, "description": "Deepgram API key — needed for deepgram STT provider (fallback if not set in plugin config)" }
+      "OPENAI_API_KEY": {
+        "required": false,
+        "description": "OpenAI API key — needed for whisper STT and openai TTS providers (fallback if not set in plugin config)"
+      },
+      "ELEVENLABS_API_KEY": {
+        "required": false,
+        "description": "ElevenLabs API key — needed for elevenlabs TTS provider (fallback if not set in plugin config)"
+      },
+      "DEEPGRAM_API_KEY": {
+        "required": false,
+        "description": "Deepgram API key — needed for deepgram STT provider (fallback if not set in plugin config)"
+      }
     },
     "systemDependencies": ["ffmpeg"]
   },
@@ -105,7 +117,11 @@
           "apiKey": { "type": "string" },
           "whisperModel": { "type": "string", "default": "whisper-1" },
           "ttsModel": { "type": "string", "default": "tts-1" },
-          "voice": { "type": "string", "default": "nova", "description": "nova, shimmer, echo, onyx, fable, alloy, ash, sage, coral" }
+          "voice": {
+            "type": "string",
+            "default": "nova",
+            "description": "nova, shimmer, echo, onyx, fable, alloy, ash, sage, coral"
+          }
         }
       },
       "kokoro": {
@@ -121,7 +137,11 @@
         "properties": {
           "apiKey": { "type": "string" },
           "voiceId": { "type": "string" },
-          "modelId": { "type": "string", "default": "eleven_turbo_v2_5", "description": "turbo, flash, v2, v3, or full model ID" }
+          "modelId": {
+            "type": "string",
+            "default": "eleven_turbo_v2_5",
+            "description": "turbo, flash, v2, v3, or full model ID"
+          }
         }
       },
       "deepgram": {
@@ -170,17 +190,17 @@
       "label": "OpenAI API Key",
       "sensitive": true
     },
-"elevenlabs.apiKey": {
-        "label": "ElevenLabs API Key",
-        "sensitive": true
-      },
-      "elevenlabs.modelId": {
-        "label": "ElevenLabs Model",
-        "help": "turbo, flash, v2, v3 (or full model ID)"
-      },
-      "thinkingSound.enabled": { "label": "Thinking Sound", "help": "Play sound while processing" },
-      "thinkingSound.path": { "label": "Thinking Sound File", "help": "Path to MP3" },
-      "thinkingSound.volume": { "label": "Thinking Sound Volume", "help": "Volume 0-1" },
+    "elevenlabs.apiKey": {
+      "label": "ElevenLabs API Key",
+      "sensitive": true
+    },
+    "elevenlabs.modelId": {
+      "label": "ElevenLabs Model",
+      "help": "turbo, flash, v2, v3 (or full model ID)"
+    },
+    "thinkingSound.enabled": { "label": "Thinking Sound", "help": "Play sound while processing" },
+    "thinkingSound.path": { "label": "Thinking Sound File", "help": "Path to MP3" },
+    "thinkingSound.volume": { "label": "Thinking Sound Volume", "help": "Volume 0-1" },
     "deepgram.apiKey": {
       "label": "Deepgram API Key",
       "sensitive": true
