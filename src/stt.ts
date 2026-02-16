@@ -28,7 +28,7 @@ export class WhisperSTT implements STTProvider {
   private model: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY || "";
+    this.apiKey = config.openai?.apiKey || process.env["OPENAI_API_KEY"] || "";
     this.model = config.openai?.whisperModel || "whisper-1";
 
     if (!this.apiKey) {
@@ -117,7 +117,7 @@ export class OpenAITranscribeSTT implements STTProvider {
   private model: string;
 
   constructor(config: DiscordVoiceConfig, model: string) {
-    this.apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY || "";
+    this.apiKey = config.openai?.apiKey || process.env["OPENAI_API_KEY"] || "";
     this.model = model;
 
     if (!this.apiKey) {
@@ -153,7 +153,7 @@ export class OpenAITranscribeSTT implements STTProvider {
     };
 
     // gpt-4o-transcribe-diarize returns segments; plain models return text
-    const text = result.text ?? (result.segments?.map((s) => s.text).join(" ") ?? "");
+    const text = result.text ?? result.segments?.map((s) => s.text).join(" ") ?? "";
     return {
       text: text.trim(),
       language: result.language,
@@ -169,7 +169,7 @@ export class DeepgramSTT implements STTProvider {
   private model: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.deepgram?.apiKey || process.env.DEEPGRAM_API_KEY || "";
+    this.apiKey = config.deepgram?.apiKey || process.env["DEEPGRAM_API_KEY"] || "";
     this.model = config.deepgram?.model || "nova-2";
 
     if (!this.apiKey) {
@@ -257,7 +257,6 @@ export class LocalWhisperSTT implements STTProvider {
       LocalWhisperSTT.initializationPromise = (async () => {
         try {
           console.log(`Loading local Whisper model: ${this.model} (quantized: ${this.quantized})...`);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           sharedWhisperPipeline = (await pipeline("automatic-speech-recognition", this.model, {
             quantized: this.quantized,
           })) as unknown as ASRPipeline;

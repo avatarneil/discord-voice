@@ -4,12 +4,24 @@
   "description": "Real-time voice conversations in Discord voice channels",
   "requirements": {
     "config": {
-      "discord.token": { "required": true, "description": "Discord bot token (via channels.discord.token or discord.token in main config)" }
+      "discord.token": {
+        "required": true,
+        "description": "Discord bot token (via channels.discord.token or discord.token in main config)"
+      }
     },
     "env": {
-      "OPENAI_API_KEY": { "required": false, "description": "OpenAI API key — needed for whisper STT and openai TTS providers (fallback if not set in plugin config)" },
-      "ELEVENLABS_API_KEY": { "required": false, "description": "ElevenLabs API key — needed for elevenlabs TTS provider (fallback if not set in plugin config)" },
-      "DEEPGRAM_API_KEY": { "required": false, "description": "Deepgram API key — needed for deepgram STT provider (fallback if not set in plugin config)" }
+      "OPENAI_API_KEY": {
+        "required": false,
+        "description": "OpenAI API key — needed for whisper STT and openai TTS providers (fallback if not set in plugin config)"
+      },
+      "ELEVENLABS_API_KEY": {
+        "required": false,
+        "description": "ElevenLabs API key — needed for elevenlabs TTS provider (fallback if not set in plugin config)"
+      },
+      "DEEPGRAM_API_KEY": {
+        "required": false,
+        "description": "Deepgram API key — needed for deepgram STT provider (fallback if not set in plugin config)"
+      }
     },
     "systemDependencies": ["ffmpeg"]
   },
@@ -63,10 +75,7 @@
         "description": "Thinking level for voice responses (lower = faster)"
       },
       "noEmojiHint": {
-        "oneOf": [
-          { "type": "boolean" },
-          { "type": "string" }
-        ],
+        "oneOf": [{ "type": "boolean" }, { "type": "string" }],
         "default": true,
         "description": "Inject TTS hint: true = default 'no emojis' text, false = off, string = custom text"
       },
@@ -100,7 +109,11 @@
         "type": "object",
         "properties": {
           "enabled": { "type": "boolean", "default": true, "description": "Play sound while processing" },
-          "path": { "type": "string", "default": "assets/thinking.mp3", "description": "Path to MP3 (relative to plugin root or absolute)" },
+          "path": {
+            "type": "string",
+            "default": "assets/thinking.mp3",
+            "description": "Path to MP3 (relative to plugin root or absolute)"
+          },
           "volume": { "type": "number", "default": 0.7, "minimum": 0, "maximum": 1, "description": "Volume 0-1" }
         }
       },
@@ -110,7 +123,11 @@
           "apiKey": { "type": "string" },
           "whisperModel": { "type": "string", "default": "whisper-1" },
           "ttsModel": { "type": "string", "default": "tts-1" },
-          "voice": { "type": "string", "default": "nova", "description": "nova, shimmer, echo, onyx, fable, alloy, ash, sage, coral" }
+          "voice": {
+            "type": "string",
+            "default": "nova",
+            "description": "nova, shimmer, echo, onyx, fable, alloy, ash, sage, coral"
+          }
         }
       },
       "kokoro": {
@@ -147,10 +164,10 @@
       "label": "Enable Discord Voice",
       "help": "Enable real-time voice conversations in Discord voice channels"
     },
-"sttProvider": {
-        "label": "Speech-to-Text Provider",
-        "help": "whisper, gpt4o-mini, gpt4o-transcribe, gpt4o-transcribe-diarize (OpenAI), or deepgram"
-      },
+    "sttProvider": {
+      "label": "Speech-to-Text Provider",
+      "help": "whisper, gpt4o-mini, gpt4o-transcribe, gpt4o-transcribe-diarize (OpenAI), or deepgram"
+    },
     "ttsProvider": {
       "label": "Text-to-Speech Provider",
       "help": "openai, elevenlabs, or kokoro (free local)"

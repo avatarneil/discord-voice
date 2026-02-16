@@ -1,0 +1,76 @@
+{
+  "plugins": ["typescript", "unicorn", "import", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "pedantic": "warn",
+    "perf": "warn",
+    "style": "warn"
+  },
+  "rules": {
+    "prefer-const": "error",
+    "no-var": "error",
+    "no-param-reassign": ["error", { "props": false }],
+    "eqeqeq": "error",
+    "no-throw-literal": "error",
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "typescript/no-explicit-any": "error",
+    "typescript/prefer-readonly": "warn",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/no-array-for-each": "warn",
+    "unicorn/prefer-array-flat-map": "warn",
+    "import/no-cycle": "error",
+    "import/no-self-import": "error",
+
+    "import/group-exports": "off",
+    "import/no-named-export": "off",
+    "import/no-default-export": "off",
+    "func-style": "off",
+    "no-inline-comments": "off",
+    "promise/avoid-new": "off",
+    "unicorn/numeric-separators-style": "off",
+    "unicorn/prefer-spread": "off",
+    "unicorn/prefer-string-replace-all": "off",
+    "unicorn/prefer-string-slice": "off",
+    "unicorn/switch-case-braces": "off",
+    "unicorn/prefer-type-error": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/prefer-top-level-await": "off",
+    "unicorn/no-null": "off",
+    "unicorn/no-nested-ternary": "off",
+    "unicorn/prefer-ternary": "off",
+    "unicorn/no-typeof-undefined": "off",
+    "unicorn/explicit-length-check": "off",
+    "unicorn/prefer-logical-operator-over-ternary": "off",
+    "typescript/no-non-null-assertion": "off",
+    "typescript/no-non-null-asserted-optional-chain": "off",
+    "typescript/consistent-type-definitions": "off",
+    "typescript/prefer-literal-enum-member": "off",
+    "max-params": "off",
+    "no-magic-numbers": "off",
+    "no-bitwise": "off",
+    "default-case": "off",
+    "no-case-declarations": "off",
+    "no-empty": "off",
+    "no-void": "off",
+    "no-plusplus": "off",
+    "complexity": "off",
+    "max-classes-per-file": "off"
+  },
+  "overrides": [
+    {
+      "files": ["scripts/**/*.mjs"],
+      "rules": {
+        "no-param-reassign": "off",
+        "typescript/no-explicit-any": "off",
+        "no-unused-vars": "off"
+      }
+    }
+  ]
+}

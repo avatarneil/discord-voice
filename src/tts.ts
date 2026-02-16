@@ -35,7 +35,7 @@ export class OpenAITTS implements TTSProvider {
   private voice: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY || "";
+    this.apiKey = config.openai?.apiKey || process.env["OPENAI_API_KEY"] || "";
     this.model = config.openai?.ttsModel || "tts-1";
     this.voice = resolveOpenAIVoice(config.openai?.voice);
 
@@ -82,7 +82,7 @@ export class ElevenLabsTTS implements TTSProvider {
   private modelId: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.elevenlabs?.apiKey || process.env.ELEVENLABS_API_KEY || "";
+    this.apiKey = config.elevenlabs?.apiKey || process.env["ELEVENLABS_API_KEY"] || "";
     this.voiceId = config.elevenlabs?.voiceId || "21m00Tcm4TlvDq8ikWAM"; // Default: Rachel
     this.modelId = config.elevenlabs?.modelId || "eleven_turbo_v2_5";
 
@@ -186,7 +186,7 @@ export class KokoroTTSProvider implements TTSProvider {
     const buffer = Buffer.alloc(float32Array.length * 2);
     for (let i = 0; i < float32Array.length; i++) {
       // Clamp between -1 and 1
-      const s = Math.max(-1, Math.min(1, float32Array[i]));
+      const s = Math.max(-1, Math.min(1, float32Array[i]!));
       // Convert to 16-bit PCM
       const val = s < 0 ? s * 0x8000 : s * 0x7fff;
       buffer.writeInt16LE(Math.floor(val), i * 2);
