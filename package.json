@@ -1,27 +1,39 @@
 {
   "name": "@clawdbot/discord-voice",
   "version": "0.1.0",
-  "type": "module",
   "description": "Discord voice channel plugin for OpenClaw - real-time voice conversations",
-  "main": "index.ts",
-  "author": "Discord Voice Plugin Contributors",
+  "keywords": [
+    "ai",
+    "claude",
+    "deepgram",
+    "discord",
+    "elevenlabs",
+    "openclaw",
+    "speech-to-text",
+    "text-to-speech",
+    "voice",
+    "whisper"
+  ],
   "license": "MIT",
+  "author": "Discord Voice Plugin Contributors",
   "repository": {
     "type": "git",
     "url": "https://github.com/clawdbot/discord-voice"
   },
-  "keywords": [
-    "openclaw",
-    "discord",
-    "voice",
-    "speech-to-text",
-    "text-to-speech",
-    "ai",
-    "claude",
-    "whisper",
-    "deepgram",
-    "elevenlabs"
-  ],
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "smoke-test": "node scripts/smoke-test.mjs",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "check": "npm run lint && npm run typecheck",
+    "fix": "npm run fmt && npm run lint:fix"
+  },
   "dependencies": {
     "@aws-sdk/client-polly": "^3.990.0",
     "@deepgram/sdk": "^4.11.3",
@@ -38,29 +50,24 @@
     "wavefile": "^11.0.0",
     "ws": "^8.18.0"
   },
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "smoke-test": "node scripts/smoke-test.mjs",
-    "build": "tsc",
-    "watch": "tsc -w",
-    "lint": "eslint src --ext .ts"
+  "devDependencies": {
+    "@types/node": "^25.0.10",
+    "@types/ws": "^8.18.0",
+    "oxfmt": "^0.32.0",
+    "oxlint": "^1.47.0",
+    "typescript": "^5.9.3"
   },
-  "openclaw": {
-    "extensions": [
-      "./index.ts"
-    ]
+  "peerDependencies": {
+    "openclaw": ">=2025.0.0"
   },
   "clawdbot": {
     "extensions": [
       "./index.ts"
     ]
   },
-  "peerDependencies": {
-    "openclaw": ">=2025.0.0"
-  },
-  "devDependencies": {
-    "@types/node": "^25.0.10",
-    "@types/ws": "^8.18.0",
-    "typescript": "^5.9.3"
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
   }
 }

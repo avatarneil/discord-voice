@@ -8,7 +8,13 @@ import path from "node:path";
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { EdgeTTS } from "node-edge-tts";
 import type { DiscordVoiceConfig } from "./config.js";
+import { validateElevenLabsVoiceId, validateKokoroModel } from "./config.js";
 import { KokoroTTS } from "kokoro-js";
+
+/** Truncate API error bodies to prevent leaking sensitive information in logs */
+function truncateError(text: string, maxLen = 200): string {
+  return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
+}
 
 // Helper type for voice keys since it's not easily accessible
 type KokoroVoice = keyof KokoroTTS["voices"];
@@ -40,7 +46,7 @@ export class OpenAITTS implements TTSProvider {
   private voice: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY || "";
+    this.apiKey = config.openai?.apiKey || process.env["OPENAI_API_KEY"] || "";
     this.model = config.openai?.ttsModel || "tts-1";
     this.voice = resolveOpenAIVoice(config.openai?.voice);
 
@@ -66,7 +72,7 @@ export class OpenAITTS implements TTSProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`OpenAI TTS error: ${response.status} ${error}`);
+      throw new Error(`OpenAI TTS error: ${response.status} ${truncateError(error)}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -87,8 +93,8 @@ export class ElevenLabsTTS implements TTSProvider {
   private modelId: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.elevenlabs?.apiKey || process.env.ELEVENLABS_API_KEY || "";
-    this.voiceId = config.elevenlabs?.voiceId || "21m00Tcm4TlvDq8ikWAM"; // Default: Rachel
+    this.apiKey = config.elevenlabs?.apiKey || process.env["ELEVENLABS_API_KEY"] || "";
+    this.voiceId = validateElevenLabsVoiceId(config.elevenlabs?.voiceId || "21m00Tcm4TlvDq8ikWAM");
     this.modelId = config.elevenlabs?.modelId || "eleven_turbo_v2_5";
 
     if (!this.apiKey) {
@@ -97,7 +103,7 @@ export class ElevenLabsTTS implements TTSProvider {
   }
 
   async synthesize(text: string): Promise<TTSResult> {
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}`, {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.voiceId)}`, {
       method: "POST",
       headers: {
         "xi-api-key": this.apiKey,
@@ -116,7 +122,7 @@ export class ElevenLabsTTS implements TTSProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`ElevenLabs TTS error: ${response.status} ${error}`);
+      throw new Error(`ElevenLabs TTS error: ${response.status} ${truncateError(error)}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -124,6 +130,83 @@ export class ElevenLabsTTS implements TTSProvider {
       audioBuffer: Buffer.from(arrayBuffer),
       format: "mp3",
       sampleRate: 44100,
+    };
+  }
+}
+
+// Shared instance to prevent loading the model multiple times (Singleton)
+let sharedKokoroInstance: KokoroTTS | null = null;
+let sharedInitPromise: Promise<void> | null = null;
+
+/**
+ * Kokoro TTS Provider (Local/Offline)
+ */
+export class KokoroTTSProvider implements TTSProvider {
+  private modelId: string;
+  private dtype: "fp32" | "fp16" | "q8" | "q4" | "q4f16";
+  private voice: string;
+
+  constructor(config: DiscordVoiceConfig) {
+    this.modelId = validateKokoroModel(config.kokoro?.modelId || "onnx-community/Kokoro-82M-v1.0-ONNX");
+    this.dtype = config.kokoro?.dtype || "fp32";
+    this.voice = config.kokoro?.voice ?? "af_heart";
+  }
+
+  private async ensureInitialized() {
+    if (sharedKokoroInstance) return;
+
+    if (!sharedInitPromise) {
+      sharedInitPromise = (async () => {
+        try {
+          console.log(`Loading Kokoro TTS model: ${this.modelId} (${this.dtype})...`);
+          sharedKokoroInstance = await KokoroTTS.from_pretrained(this.modelId, {
+            dtype: this.dtype,
+            device: "cpu", // Node.js always uses CPU
+          });
+          console.log("Kokoro TTS model loaded.");
+        } catch (error) {
+          console.error("Failed to load Kokoro TTS model:", error);
+          sharedInitPromise = null; // Reset promise to allow retries
+          throw error;
+        }
+      })();
+    }
+
+    await sharedInitPromise;
+  }
+
+  async synthesize(text: string): Promise<TTSResult> {
+    await this.ensureInitialized();
+
+    if (!sharedKokoroInstance) {
+      throw new Error("Kokoro TTS failed to initialize");
+    }
+
+    // Validate voice exists, fallback to default if not
+    const requestedVoice = this.voice as KokoroVoice;
+    const voice = requestedVoice in sharedKokoroInstance.voices ? requestedVoice : "af_heart";
+
+    const audioObj = await sharedKokoroInstance.generate(text, {
+      voice,
+    });
+
+    // Convert Float32Array to Int16 PCM Buffer
+    const float32Array = audioObj.audio;
+    const sampleRate = audioObj.sampling_rate;
+
+    const buffer = Buffer.alloc(float32Array.length * 2);
+    for (let i = 0; i < float32Array.length; i++) {
+      // Clamp between -1 and 1
+      const s = Math.max(-1, Math.min(1, float32Array[i]!));
+      // Convert to 16-bit PCM
+      const val = s < 0 ? s * 0x8000 : s * 0x7fff;
+      buffer.writeInt16LE(Math.floor(val), i * 2);
+    }
+
+    return {
+      audioBuffer: buffer,
+      format: "pcm",
+      sampleRate: sampleRate,
     };
   }
 }
@@ -137,7 +220,7 @@ export class DeepgramTTS implements TTSProvider {
   private model: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.deepgram?.apiKey || process.env.DEEPGRAM_API_KEY || "";
+    this.apiKey = config.deepgram?.apiKey || process.env["DEEPGRAM_API_KEY"] || "";
     this.model = config.deepgram?.ttsModel ?? config.deepgram?.model ?? "aura-asteria-en";
 
     if (!this.apiKey) {
@@ -184,15 +267,16 @@ export class PollyTTS implements TTSProvider {
 
   constructor(config: DiscordVoiceConfig) {
     const polly = config.polly ?? {};
-    const region = polly.region ?? process.env.AWS_REGION ?? "us-east-1";
+    const region = polly.region ?? process.env["AWS_REGION"] ?? "us-east-1";
     this.client = new PollyClient({
       region,
-      credentials: polly.accessKeyId && polly.secretAccessKey
-        ? {
-            accessKeyId: polly.accessKeyId,
-            secretAccessKey: polly.secretAccessKey,
-          }
-        : undefined,
+      credentials:
+        polly.accessKeyId && polly.secretAccessKey
+          ? {
+              accessKeyId: polly.accessKeyId,
+              secretAccessKey: polly.secretAccessKey,
+            }
+          : undefined,
     });
     this.voiceId = polly.voiceId ?? "Joanna";
     this.engine = polly.engine;
@@ -293,83 +377,6 @@ export class EdgeTTSProvider implements TTSProvider {
         // ignore cleanup errors
       }
     }
-  }
-}
-
-// Shared instance to prevent loading the model multiple times (Singleton)
-let sharedKokoroInstance: KokoroTTS | null = null;
-let sharedInitPromise: Promise<void> | null = null;
-
-/**
- * Kokoro TTS Provider (Local/Offline)
- */
-export class KokoroTTSProvider implements TTSProvider {
-  private modelId: string;
-  private dtype: "fp32" | "fp16" | "q8" | "q4" | "q4f16";
-  private voice: string;
-
-  constructor(config: DiscordVoiceConfig) {
-    this.modelId = config.kokoro?.modelId || "onnx-community/Kokoro-82M-v1.0-ONNX";
-    this.dtype = config.kokoro?.dtype || "fp32";
-    this.voice = config.kokoro?.voice ?? "af_heart";
-  }
-
-  private async ensureInitialized() {
-    if (sharedKokoroInstance) return;
-
-    if (!sharedInitPromise) {
-      sharedInitPromise = (async () => {
-        try {
-          console.log(`Loading Kokoro TTS model: ${this.modelId} (${this.dtype})...`);
-          sharedKokoroInstance = await KokoroTTS.from_pretrained(this.modelId, {
-            dtype: this.dtype,
-            device: "cpu", // Node.js always uses CPU
-          });
-          console.log("Kokoro TTS model loaded.");
-        } catch (error) {
-          console.error("Failed to load Kokoro TTS model:", error);
-          sharedInitPromise = null; // Reset promise to allow retries
-          throw error;
-        }
-      })();
-    }
-
-    await sharedInitPromise;
-  }
-
-  async synthesize(text: string): Promise<TTSResult> {
-    await this.ensureInitialized();
-
-    if (!sharedKokoroInstance) {
-      throw new Error("Kokoro TTS failed to initialize");
-    }
-
-    // Validate voice exists, fallback to default if not
-    const requestedVoice = this.voice as KokoroVoice;
-    const voice = requestedVoice in sharedKokoroInstance.voices ? requestedVoice : "af_heart";
-
-    const audioObj = await sharedKokoroInstance.generate(text, {
-      voice,
-    });
-
-    // Convert Float32Array to Int16 PCM Buffer
-    const float32Array = audioObj.audio;
-    const sampleRate = audioObj.sampling_rate;
-
-    const buffer = Buffer.alloc(float32Array.length * 2);
-    for (let i = 0; i < float32Array.length; i++) {
-      // Clamp between -1 and 1
-      const s = Math.max(-1, Math.min(1, float32Array[i]));
-      // Convert to 16-bit PCM
-      const val = s < 0 ? s * 0x8000 : s * 0x7fff;
-      buffer.writeInt16LE(Math.floor(val), i * 2);
-    }
-
-    return {
-      audioBuffer: buffer,
-      format: "pcm",
-      sampleRate: sampleRate,
-    };
   }
 }
 

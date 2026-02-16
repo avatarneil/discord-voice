@@ -4,7 +4,18 @@
 
 import * as net from "node:net";
 import type { DiscordVoiceConfig } from "./config.js";
+import { validateWhisperModel, validateDeepgramModel } from "./config.js";
+import { pipeline, env } from "@xenova/transformers";
 import { WaveFile } from "wavefile";
+
+/** Truncate API error bodies to prevent leaking sensitive information in logs */
+function truncateError(text: string, maxLen = 200): string {
+  return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
+}
+
+// Disable local model checks if not using local models, but here we want local
+env.allowLocalModels = true; // Allow loading from local file system
+env.useBrowserCache = false; // Ensure Node cache is used
 
 export interface STTResult {
   text: string;
@@ -24,7 +35,7 @@ export class WhisperSTT implements STTProvider {
   private model: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY || "";
+    this.apiKey = config.openai?.apiKey || process.env["OPENAI_API_KEY"] || "";
     this.model = config.openai?.whisperModel || "whisper-1";
 
     if (!this.apiKey) {
@@ -51,7 +62,7 @@ export class WhisperSTT implements STTProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Whisper API error: ${response.status} ${error}`);
+      throw new Error(`Whisper API error: ${response.status} ${truncateError(error)}`);
     }
 
     const result = (await response.json()) as { text: string; language?: string };
@@ -113,7 +124,7 @@ export class OpenAITranscribeSTT implements STTProvider {
   private model: string;
 
   constructor(config: DiscordVoiceConfig, model: string) {
-    this.apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY || "";
+    this.apiKey = config.openai?.apiKey || process.env["OPENAI_API_KEY"] || "";
     this.model = model;
 
     if (!this.apiKey) {
@@ -139,7 +150,7 @@ export class OpenAITranscribeSTT implements STTProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`OpenAI transcribe API error (${this.model}): ${response.status} ${error}`);
+      throw new Error(`OpenAI transcribe API error (${this.model}): ${response.status} ${truncateError(error)}`);
     }
 
     const result = (await response.json()) as {
@@ -149,7 +160,7 @@ export class OpenAITranscribeSTT implements STTProvider {
     };
 
     // gpt-4o-transcribe-diarize returns segments; plain models return text
-    const text = result.text ?? (result.segments?.map((s) => s.text).join(" ") ?? "");
+    const text = result.text ?? result.segments?.map((s) => s.text).join(" ") ?? "";
     return {
       text: text.trim(),
       language: result.language,
@@ -165,8 +176,8 @@ export class DeepgramSTT implements STTProvider {
   private model: string;
 
   constructor(config: DiscordVoiceConfig) {
-    this.apiKey = config.deepgram?.apiKey || process.env.DEEPGRAM_API_KEY || "";
-    this.model = config.deepgram?.model || "nova-2";
+    this.apiKey = config.deepgram?.apiKey || process.env["DEEPGRAM_API_KEY"] || "";
+    this.model = validateDeepgramModel(config.deepgram?.model || "nova-2");
 
     if (!this.apiKey) {
       throw new Error("Deepgram API key required for Deepgram STT");
@@ -194,7 +205,7 @@ export class DeepgramSTT implements STTProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Deepgram API error: ${response.status} ${error}`);
+      throw new Error(`Deepgram API error: ${response.status} ${truncateError(error)}`);
     }
 
     const result = (await response.json()) as {
@@ -242,7 +253,7 @@ export class LocalWhisperSTT implements STTProvider {
   private static initializationPromise: Promise<void> | null = null;
 
   constructor(config: DiscordVoiceConfig) {
-    this.model = config.localWhisper?.model || "Xenova/whisper-tiny.en";
+    this.model = validateWhisperModel(config.localWhisper?.model || "Xenova/whisper-tiny.en");
     this.quantized = config.localWhisper?.quantized ?? true;
   }
 
@@ -250,20 +261,11 @@ export class LocalWhisperSTT implements STTProvider {
     if (sharedWhisperPipeline) return;
 
     if (!LocalWhisperSTT.initializationPromise) {
-      const model = this.model;
-      const quantized = this.quantized;
       LocalWhisperSTT.initializationPromise = (async () => {
         try {
-          // Lazy-load Xenova only when LocalWhisperSTT is actually used.
-          // Top-level import can crash OpenClaw/Electron on startup.
-          const { pipeline, env } = await import("@xenova/transformers");
-          env.allowLocalModels = true;
-          env.useBrowserCache = false;
-
-          console.log(`Loading local Whisper model: ${model} (quantized: ${quantized})...`);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          sharedWhisperPipeline = (await pipeline("automatic-speech-recognition", model, {
-            quantized,
+          console.log(`Loading local Whisper model: ${this.model} (quantized: ${this.quantized})...`);
+          sharedWhisperPipeline = (await pipeline("automatic-speech-recognition", this.model, {
+            quantized: this.quantized,
           })) as unknown as ASRPipeline;
           console.log("Local Whisper model loaded.");
         } catch (error) {
@@ -350,7 +352,8 @@ export class WyomingWhisperSTT implements STTProvider {
     this.host = ww.host ?? "127.0.0.1";
     this.port = ww.port ?? 10300;
     this.language = typeof ww.language === "string" && ww.language.trim() ? ww.language.trim() : undefined;
-    this.connectTimeoutMs = typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? ww.connectTimeoutMs : 10000;
+    this.connectTimeoutMs =
+      typeof ww.connectTimeoutMs === "number" && ww.connectTimeoutMs > 0 ? ww.connectTimeoutMs : 10000;
   }
 
   async transcribe(audioBuffer: Buffer, sampleRate: number): Promise<STTResult> {
@@ -366,19 +369,19 @@ export class WyomingWhisperSTT implements STTProvider {
 
       const socket = net.createConnection({ host: this.host, port: this.port }, () => {
         let transcriptText = "";
-        let lineBuffer = "";
         const rate = sampleRate;
         const width = 2;
         const channels = 1;
 
         const sendMessage = (type: string, data: Record<string, unknown>, payload?: Buffer) => {
           const payloadLen = payload ? payload.length : 0;
-          const header = JSON.stringify({
-            type,
-            data,
-            data_length: 0,
-            payload_length: payloadLen,
-          }) + "\n";
+          const header =
+            JSON.stringify({
+              type,
+              data,
+              data_length: 0,
+              payload_length: payloadLen,
+            }) + "\n";
           socket.write(header);
           if (payload && payloadLen > 0) socket.write(payload);
         };
@@ -390,10 +393,10 @@ export class WyomingWhisperSTT implements STTProvider {
         let lastHeader: { type: string } | null = null;
 
         const processEvent = (h: { type: string }, data: { text?: string }) => {
-          if (h.type === "transcript" && data.text != null) {
+          if (h.type === "transcript" && data.text !== undefined && data.text !== null) {
             transcriptText = data.text;
             finish(transcriptText);
-          } else if (h.type === "transcript-chunk" && data.text != null) {
+          } else if (h.type === "transcript-chunk" && data.text !== undefined && data.text !== null) {
             transcriptText += data.text;
           } else if (h.type === "transcript-stop") {
             finish(transcriptText);
@@ -406,7 +409,7 @@ export class WyomingWhisperSTT implements STTProvider {
             if (state === "header") {
               const idx = rawBuffer.indexOf(0x0a);
               if (idx === -1) break;
-              const line = rawBuffer.slice(0, idx).toString("utf-8");
+              const line = rawBuffer.slice(0, idx).toString("utf8");
               rawBuffer = rawBuffer.slice(idx + 1);
               try {
                 const h = JSON.parse(line) as { type: string; data_length?: number; payload_length?: number };
@@ -427,7 +430,7 @@ export class WyomingWhisperSTT implements STTProvider {
               const dataBytes = rawBuffer.slice(0, dataLength);
               rawBuffer = rawBuffer.slice(dataLength);
               try {
-                const data = JSON.parse(dataBytes.toString("utf-8")) as { text?: string };
+                const data = JSON.parse(dataBytes.toString("utf8")) as { text?: string };
                 processEvent(lastHeader!, data);
                 if (resolved) return;
               } catch {
