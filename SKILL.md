@@ -4,10 +4,10 @@ description: Real-time voice conversations in Discord voice channels with Claude
 metadata:
   clawdbot:
     config:
-      requiredEnv:
-        - DISCORD_TOKEN
-        - OPENAI_API_KEY
+      requiredConfig:
+        - discord.token
       optionalEnv:
+        - OPENAI_API_KEY
         - ELEVENLABS_API_KEY
         - DEEPGRAM_API_KEY
       systemDependencies:
