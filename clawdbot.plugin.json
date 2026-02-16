@@ -27,7 +27,7 @@
   },
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
+    "additionalProperties": true,
     "properties": {
       "enabled": { "type": "boolean", "default": true },
       "sttProvider": {
