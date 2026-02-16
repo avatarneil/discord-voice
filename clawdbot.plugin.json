@@ -2,6 +2,15 @@
   "id": "discord-voice",
   "name": "Discord Voice",
   "description": "Real-time voice conversations in Discord voice channels",
+  "requirements": {
+    "env": {
+      "DISCORD_TOKEN": { "required": true, "description": "Discord bot token" },
+      "OPENAI_API_KEY": { "required": true, "description": "OpenAI API key (Whisper STT + TTS)" },
+      "ELEVENLABS_API_KEY": { "required": false, "description": "ElevenLabs API key (optional TTS provider)" },
+      "DEEPGRAM_API_KEY": { "required": false, "description": "Deepgram API key (optional STT provider)" }
+    },
+    "systemDependencies": ["ffmpeg"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

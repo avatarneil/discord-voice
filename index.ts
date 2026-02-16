@@ -225,7 +225,7 @@ const discordVoicePlugin = {
             : typeof cfg.noEmojiHint === "string"
               ? ` ${cfg.noEmojiHint}`
               : ` ${DEFAULT_NO_EMOJI_HINT}`;
-        const extraSystemPrompt = `You are ${agentName}, speaking in a Discord voice channel. Keep responses brief and conversational (1-2 sentences max). Be natural and friendly.${noEmojiPart} You have access to all your normal tools and skills. The user's Discord ID is ${userId}.`;
+        const extraSystemPrompt = `You are ${agentName}, speaking in a Discord voice channel. Keep responses brief and conversational (1-2 sentences max). Be natural and friendly.${noEmojiPart} The user's Discord ID is ${userId}.`;
 
         const timeoutMs = deps.resolveAgentTimeoutMs({ cfg: coreConfig });
         const runId = `discord-voice:${guildId}:${Date.now()}`;
@@ -244,7 +244,7 @@ const discordVoicePlugin = {
           verboseLevel: "off",
           timeoutMs,
           runId,
-          // lane: "discord-voice",  // Removed - was possibly restricting tool access
+          lane: "discord-voice",
           extraSystemPrompt,
           agentDir,
         });
