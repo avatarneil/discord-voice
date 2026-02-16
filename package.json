@@ -48,8 +48,6 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@oxfmt/binding-darwin-arm64": "^0.32.0",
-    "@oxlint/binding-darwin-arm64": "^1.47.0",
     "@types/node": "^25.0.10",
     "@types/ws": "^8.18.0",
     "oxfmt": "^0.32.0",
