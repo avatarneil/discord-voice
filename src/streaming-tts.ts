@@ -8,6 +8,14 @@
 import { Readable, PassThrough } from "node:stream";
 import type { DiscordVoiceConfig } from "./config.js";
 
+/** Valid OpenAI TTS voice names (ttsVoice may be from Kokoro/ElevenLabs config) */
+const OPENAI_TTS_VOICES = ["nova", "shimmer", "echo", "onyx", "fable", "alloy", "ash", "sage", "coral"] as const;
+
+function resolveOpenAIVoice(configured: string | undefined): string {
+  const v = (configured || "nova").toLowerCase();
+  return OPENAI_TTS_VOICES.includes(v as (typeof OPENAI_TTS_VOICES)[number]) ? v : "nova";
+}
+
 export interface StreamingTTSResult {
   stream: Readable;
   format: "pcm" | "opus" | "mp3";
@@ -41,7 +49,7 @@ export class OpenAIStreamingTTS implements StreamingTTSProvider {
   constructor(config: DiscordVoiceConfig) {
     this.apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY || "";
     this.model = config.openai?.ttsModel || "tts-1";
-    this.voice = config.ttsVoice || "nova";
+    this.voice = resolveOpenAIVoice(config.openai?.voice);
 
     if (!this.apiKey) {
       throw new Error("OpenAI API key required for OpenAI TTS");
@@ -100,7 +108,7 @@ export class ElevenLabsStreamingTTS implements StreamingTTSProvider {
 
   constructor(config: DiscordVoiceConfig) {
     this.apiKey = config.elevenlabs?.apiKey || process.env.ELEVENLABS_API_KEY || "";
-    this.voiceId = config.elevenlabs?.voiceId || config.ttsVoice || "21m00Tcm4TlvDq8ikWAM";
+    this.voiceId = config.elevenlabs?.voiceId || "21m00Tcm4TlvDq8ikWAM";
     this.modelId = config.elevenlabs?.modelId || "eleven_turbo_v2_5"; // Turbo model is faster
 
     if (!this.apiKey) {
@@ -156,13 +164,17 @@ export class ElevenLabsStreamingTTS implements StreamingTTSProvider {
 }
 
 /**
- * Create streaming TTS provider based on config
+ * Create streaming TTS provider based on config.
+ * Returns null for Kokoro (no streaming support) – use batch TTS directly.
  */
-export function createStreamingTTSProvider(config: DiscordVoiceConfig): StreamingTTSProvider {
+export function createStreamingTTSProvider(config: DiscordVoiceConfig): StreamingTTSProvider | null {
   switch (config.ttsProvider) {
     case "elevenlabs":
       return new ElevenLabsStreamingTTS(config);
     case "openai":
+      return new OpenAIStreamingTTS(config);
+    case "kokoro":
+      return null; // Kokoro has no streaming – batch TTS used directly
     default:
       return new OpenAIStreamingTTS(config);
   }

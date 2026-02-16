@@ -8,6 +8,7 @@
  * - Streaming STT: Real-time transcription with Deepgram
  */
 
+import emojiRegex from "emoji-regex";
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -31,27 +32,51 @@ import type {
 import { Readable, PassThrough } from "stream";
 import { pipeline } from "stream/promises";
 import * as prism from "prism-media";
+import { WaveFile } from "wavefile";
 
 import type { DiscordVoiceConfig } from "./config.js";
+import type { TTSResult } from "./tts.js";
 import { getVadThreshold } from "./config.js";
 
-/**
- * Get RMS threshold based on VAD sensitivity
- * Higher = less sensitive (filters more noise)
- */
-function getRmsThreshold(sensitivity: "low" | "medium" | "high"): number {
-  switch (sensitivity) {
-    case "low":
-      return 400;   // More sensitive - picks up quieter speech
-    case "high":
-      return 1200;  // Less sensitive - requires louder speech, filters more noise
-    case "medium":
-    default:
-      return 800;   // Balanced default
-  }
-}
+import { SPEAK_COOLDOWN_VAD_MS, SPEAK_COOLDOWN_PROCESSING_MS, getRmsThreshold } from "./constants.js";
 import { createSTTProvider, type STTProvider } from "./stt.js";
 import { createTTSProvider, type TTSProvider } from "./tts.js";
+
+/** Create Discord audio resource from TTS result; PCM is converted to WAV for playback */
+function createResourceFromTTSResult(result: TTSResult): ReturnType<typeof createAudioResource> {
+  if (result.format === "opus") {
+    return createAudioResource(Readable.from(result.audioBuffer), {
+      inputType: StreamType.OggOpus,
+    });
+  }
+  if (result.format === "pcm") {
+    const wav = new WaveFile();
+    // wavefile expects sample values (-32768..32767), not raw bytes; convert Int16LE Buffer to Int16Array
+    const samples = new Int16Array(
+      result.audioBuffer.buffer,
+      result.audioBuffer.byteOffset,
+      result.audioBuffer.length / 2
+    );
+    wav.fromScratch(1, result.sampleRate, "16", samples);
+    return createAudioResource(Readable.from(Buffer.from(wav.toBuffer())));
+  }
+  return createAudioResource(Readable.from(result.audioBuffer));
+}
+
+/** Detect quota/rate-limit errors that warrant trying a fallback TTS provider */
+function isRetryableTtsError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("quota_exceeded") ||
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    /"status":\s*"quota_exceeded"/.test(msg) ||
+    /\b401\b/.test(msg) ||
+    /\b429\b/.test(msg) ||
+    /\b503\b/.test(msg)
+  );
+}
 import { StreamingSTTManager, createStreamingSTTProvider } from "./streaming-stt.js";
 import { createStreamingTTSProvider, type StreamingTTSProvider } from "./streaming-tts.js";
 
@@ -86,6 +111,8 @@ export interface VoiceSession {
   heartbeatInterval?: ReturnType<typeof setInterval>;
   lastHeartbeat?: number;
   reconnecting?: boolean;
+  /** When true, use fallback TTS for rest of session (set after primary fails with quota/rate limit) */
+  useFallbackTts?: boolean;
 }
 
 export class VoiceConnectionManager {
@@ -133,7 +160,7 @@ export class VoiceConnectionManager {
     }
     // Initialize streaming STT if using Deepgram with streaming enabled
     if (!this.streamingSTT && this.config.sttProvider === "deepgram" && this.config.streamingSTT) {
-      this.streamingSTT = createStreamingSTTProvider(this.config);
+      this.streamingSTT = createStreamingSTTProvider(this.config, this.logger);
     }
   }
 
@@ -372,8 +399,7 @@ export class VoiceConnectionManager {
       }
 
       // Ignore audio during cooldown period (prevents echo from triggering)
-      const SPEAK_COOLDOWN_MS = 800;
-      if (session.lastSpokeAt && (Date.now() - session.lastSpokeAt) < SPEAK_COOLDOWN_MS) {
+      if (session.lastSpokeAt && (Date.now() - session.lastSpokeAt) < SPEAK_COOLDOWN_VAD_MS) {
         this.logger.debug?.(`[discord-voice] Ignoring speech during cooldown (likely echo)`);
         return;
       }
@@ -444,8 +470,10 @@ export class VoiceConnectionManager {
 
       // Set silence timer to process the recording
       state.silenceTimer = setTimeout(async () => {
-        if (state.isRecording && state.chunks.length > 0) {
+        if (state.isRecording) {
+          const chunksToProcess = [...state.chunks];
           state.isRecording = false;
+          state.chunks = [];
           
           // Clean up streams
           if (state.opusStream) {
@@ -457,8 +485,9 @@ export class VoiceConnectionManager {
             state.decoder = undefined;
           }
           
-          await this.processRecording(session, userId, state.chunks);
-          state.chunks = [];
+          if (chunksToProcess.length > 0) {
+            await this.processRecording(session, userId, chunksToProcess);
+          }
         }
       }, this.config.silenceThresholdMs);
     });
@@ -492,9 +521,13 @@ export class VoiceConnectionManager {
 
     const opusStream = session.connection.receiver.subscribe(userId, {
       end: {
-        behavior: EndBehaviorType.AfterSilence,
-        duration: this.config.silenceThresholdMs,
+        behavior: EndBehaviorType.Manual,
       },
+    });
+
+    // Handle stream errors to prevent crashes
+    opusStream.on("error", (error) => {
+      this.logger.error(`[discord-voice] AudioReceiveStream error for user ${userId}: ${error.message}`);
     });
 
     state.opusStream = opusStream;
@@ -537,7 +570,17 @@ export class VoiceConnectionManager {
           if (durationMs >= this.config.maxRecordingMs) {
             this.logger.debug?.(`[discord-voice] Max recording length reached for user ${userId}`);
             state.isRecording = false;
-            this.processRecording(session, userId, state.chunks);
+            
+            if (state.opusStream) {
+              state.opusStream.destroy();
+              state.opusStream = undefined;
+            }
+            if (state.decoder) {
+              state.decoder.destroy();
+              state.decoder = undefined;
+            }
+
+            this.processRecording(session, userId, [...state.chunks]);
             state.chunks = [];
           }
         }
@@ -555,7 +598,17 @@ export class VoiceConnectionManager {
           if (durationMs >= this.config.maxRecordingMs) {
             this.logger.debug?.(`[discord-voice] Max recording length reached for user ${userId}`);
             state.isRecording = false;
-            this.processRecording(session, userId, state.chunks);
+
+            if (state.opusStream) {
+              state.opusStream.destroy();
+              state.opusStream = undefined;
+            }
+            if (state.decoder) {
+              state.decoder.destroy();
+              state.decoder = undefined;
+            }
+
+            this.processRecording(session, userId, [...state.chunks]);
             state.chunks = [];
           }
         }
@@ -591,9 +644,8 @@ export class VoiceConnectionManager {
       return;
     }
 
-    // Cooldown after speaking to prevent echo/accidental triggers (500ms)
-    const SPEAK_COOLDOWN_MS = 500;
-    if (session.lastSpokeAt && (Date.now() - session.lastSpokeAt) < SPEAK_COOLDOWN_MS) {
+    // Cooldown after speaking to prevent echo/accidental triggers
+    if (session.lastSpokeAt && (Date.now() - session.lastSpokeAt) < SPEAK_COOLDOWN_PROCESSING_MS) {
       this.logger.debug?.(`[discord-voice] Skipping processing - in cooldown period after speaking`);
       return;
     }
@@ -648,7 +700,7 @@ export class VoiceConnectionManager {
 
       this.logger.info(`[discord-voice] Transcribed: "${transcribedText}"`);
 
-      // Play looping thinking sound while processing
+      // Play looping thinking sound while processing (if enabled)
       const stopThinking = await this.startThinkingLoop(session);
 
       let response: string;
@@ -658,7 +710,10 @@ export class VoiceConnectionManager {
       } finally {
         // Always stop thinking sound, even on error
         stopThinking();
-        await new Promise(resolve => setTimeout(resolve, 100));
+        const delayMs = this.config.thinkingSound?.stopDelayMs ?? 50;
+        if (delayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
       }
       
       if (!response || response.trim().length === 0) {
@@ -679,12 +734,46 @@ export class VoiceConnectionManager {
   }
 
   /**
+   * Try to get an audio resource using a specific TTS provider (for fallback)
+   */
+  private async tryGetResourceWithProvider(
+    text: string,
+    provider: "openai" | "elevenlabs" | "kokoro"
+  ): Promise<ReturnType<typeof createAudioResource> | null> {
+    const overrideConfig = { ...this.config, ttsProvider: provider };
+    const fallbackTts = createTTSProvider(overrideConfig);
+    const fallbackStreaming = createStreamingTTSProvider(overrideConfig);
+
+    // Try streaming first (OpenAI/ElevenLabs only)
+    if (fallbackStreaming) {
+      try {
+        const streamResult = await fallbackStreaming.synthesizeStream(text);
+        if (streamResult.format === "opus") {
+          return createAudioResource(streamResult.stream, { inputType: StreamType.OggOpus });
+        }
+        return createAudioResource(streamResult.stream);
+      } catch {
+        // Fall through to batch
+      }
+    }
+
+    // Batch
+    const ttsResult = await fallbackTts.synthesize(text);
+    return createResourceFromTTSResult(ttsResult);
+  }
+
+  /**
    * Speak text in the voice channel
    */
   async speak(guildId: string, text: string): Promise<void> {
     const session = this.sessions.get(guildId);
     if (!session) {
       throw new Error("Not connected to voice channel");
+    }
+
+    // Strip emojis before TTS when noEmojiHint is set (avoids Kokoro/others reading them aloud)
+    if (this.config.noEmojiHint !== false) {
+      text = text.replace(emojiRegex(), "").replace(/\s{2,}/g, " ").trim();
     }
 
     this.ensureProviders();
@@ -696,46 +785,104 @@ export class VoiceConnectionManager {
     session.speaking = true;
     session.startedSpeakingAt = Date.now();
 
+    const waitForPlayback = () =>
+      new Promise<void>((resolve) => {
+        const onIdle = () => {
+          session.speaking = false;
+          session.lastSpokeAt = Date.now();
+          session.player.off(AudioPlayerStatus.Idle, onIdle);
+          session.player.off("error", onError);
+          resolve();
+        };
+        const onError = (error: Error) => {
+          this.logger.error(`[discord-voice] Playback error: ${error.message}`);
+          session.speaking = false;
+          session.lastSpokeAt = Date.now();
+          session.player.off(AudioPlayerStatus.Idle, onIdle);
+          session.player.off("error", onError);
+          resolve();
+        };
+        session.player.on(AudioPlayerStatus.Idle, onIdle);
+        session.player.on("error", onError);
+      });
+
     try {
       this.logger.info(`[discord-voice] Speaking: "${text.substring(0, 50)}${text.length > 50 ? "..." : ""}"`);
-      
-      let resource;
 
-      // Try streaming TTS first (lower latency)
-      if (this.streamingTTS) {
+      let resource: ReturnType<typeof createAudioResource> | null = null;
+      const fallbackProvider = this.config.ttsFallbackProvider;
+
+      // If session already switched to fallback (e.g. quota hit earlier), use it for rest of session
+      if (session.useFallbackTts && fallbackProvider) {
         try {
-          const streamResult = await this.streamingTTS.synthesizeStream(text);
-          
-          // Create audio resource from stream
-          if (streamResult.format === "opus") {
-            resource = createAudioResource(streamResult.stream, {
-              inputType: StreamType.OggOpus,
-            });
-          } else {
-            // For mp3, the audio player will transcode
-            resource = createAudioResource(streamResult.stream);
+          resource = await this.tryGetResourceWithProvider(text, fallbackProvider);
+          if (resource) {
+            this.logger.debug?.(`[discord-voice] Using fallback TTS (session): ${fallbackProvider}`);
           }
-          
-          this.logger.debug?.(`[discord-voice] Using streaming TTS`);
-        } catch (streamError) {
-          this.logger.warn(`[discord-voice] Streaming TTS failed, falling back to buffered: ${streamError instanceof Error ? streamError.message : String(streamError)}`);
-          // Fall through to buffered TTS
+        } catch (fbErr) {
+          this.logger.warn(
+            `[discord-voice] Fallback TTS failed: ${fbErr instanceof Error ? fbErr.message : String(fbErr)}`
+          );
         }
       }
 
-      // Fallback to buffered TTS
-      if (!resource && this.ttsProvider) {
-        const ttsResult = await this.ttsProvider.synthesize(text);
-        
-        if (ttsResult.format === "opus") {
-          resource = createAudioResource(Readable.from(ttsResult.audioBuffer), {
-            inputType: StreamType.OggOpus,
-          });
-        } else {
-          resource = createAudioResource(Readable.from(ttsResult.audioBuffer));
+      // Try primary: streaming first, then batch (only when not already on fallback)
+      if (!resource && this.streamingTTS) {
+        try {
+          const streamResult = await this.streamingTTS.synthesizeStream(text);
+          if (streamResult.format === "opus") {
+            resource = createAudioResource(streamResult.stream, { inputType: StreamType.OggOpus });
+          } else {
+            resource = createAudioResource(streamResult.stream);
+          }
+          this.logger.debug?.(`[discord-voice] Using streaming TTS`);
+        } catch (streamError) {
+          this.logger.warn(
+            `[discord-voice] Streaming TTS failed, falling back to buffered: ${streamError instanceof Error ? streamError.message : String(streamError)}`
+          );
+          // If retryable (quota/rate limit) and fallback configured, skip batch and try fallback
+          if (fallbackProvider && isRetryableTtsError(streamError)) {
+            this.logger.warn(
+              `[discord-voice] Primary TTS failed (quota/rate limit), trying fallback: ${fallbackProvider}`
+            );
+            try {
+              resource = await this.tryGetResourceWithProvider(text, fallbackProvider);
+              if (resource) {
+                session.useFallbackTts = true;
+                this.logger.info(`[discord-voice] Using fallback TTS: ${fallbackProvider} (session will stay on fallback)`);
+              }
+            } catch {
+              // Fall through to batch
+            }
+          }
         }
-        
-        this.logger.debug?.(`[discord-voice] Using buffered TTS`);
+      }
+
+      if (!resource && this.ttsProvider) {
+        try {
+          const ttsResult = await this.ttsProvider.synthesize(text);
+          resource = createResourceFromTTSResult(ttsResult);
+          this.logger.debug?.(`[discord-voice] Using buffered TTS`);
+        } catch (batchError) {
+          // Primary failed – try fallback if configured and error is retryable
+          if (fallbackProvider && isRetryableTtsError(batchError)) {
+            this.logger.warn(
+              `[discord-voice] Primary TTS failed (quota/rate limit), trying fallback: ${fallbackProvider}`
+            );
+            try {
+              resource = await this.tryGetResourceWithProvider(text, fallbackProvider);
+              if (resource) {
+                session.useFallbackTts = true;
+                this.logger.info(`[discord-voice] Using fallback TTS: ${fallbackProvider} (session will stay on fallback)`);
+              }
+            } catch (fbErr) {
+              this.logger.warn(
+                `[discord-voice] Fallback TTS failed: ${fbErr instanceof Error ? fbErr.message : String(fbErr)}`
+              );
+            }
+          }
+          if (!resource) throw batchError;
+        }
       }
 
       if (!resource) {
@@ -743,56 +890,40 @@ export class VoiceConnectionManager {
       }
 
       session.player.play(resource);
-
-      // Wait for playback to finish
-      await new Promise<void>((resolve) => {
-        const onIdle = () => {
-          session.speaking = false;
-          session.lastSpokeAt = Date.now(); // Set cooldown timestamp
-          session.player.off(AudioPlayerStatus.Idle, onIdle);
-          session.player.off("error", onError);
-          resolve();
-        };
-        
-        const onError = (error: Error) => {
-          this.logger.error(`[discord-voice] Playback error: ${error.message}`);
-          session.speaking = false;
-          session.lastSpokeAt = Date.now(); // Set cooldown timestamp
-          session.player.off(AudioPlayerStatus.Idle, onIdle);
-          session.player.off("error", onError);
-          resolve();
-        };
-
-        session.player.on(AudioPlayerStatus.Idle, onIdle);
-        session.player.on("error", onError);
-      });
+      await waitForPlayback();
     } catch (error) {
       session.speaking = false;
-      session.lastSpokeAt = Date.now(); // Set cooldown timestamp
+      session.lastSpokeAt = Date.now();
       throw error;
     }
   }
 
   /**
    * Start looping thinking sound, returns stop function
+   * No-op if disabled or file not found
    */
   private async startThinkingLoop(session: VoiceSession): Promise<() => void> {
+    const ts = this.config.thinkingSound;
+    if (ts?.enabled === false) return () => {};
+
     let stopped = false;
-    
     try {
       const fs = await import("node:fs");
       const path = await import("node:path");
       const { fileURLToPath } = await import("node:url");
-      
+
       const __dirname = path.dirname(fileURLToPath(import.meta.url));
-      const thinkingPath = path.join(__dirname, "..", "assets", "thinking.mp3");
-      
+      const pluginRoot = path.join(__dirname, "..");
+      const pathRaw = ts?.path ?? "assets/thinking.mp3";
+      const thinkingPath = path.isAbsolute(pathRaw) ? pathRaw : path.join(pluginRoot, pathRaw);
+
       if (!fs.existsSync(thinkingPath)) {
         return () => {};
       }
 
       const audioData = fs.readFileSync(thinkingPath);
-      
+      const volume = typeof ts?.volume === "number" && ts.volume >= 0 && ts.volume <= 1 ? ts.volume : 0.7;
+
       // Create separate player for thinking sound
       const thinkingPlayer = createAudioPlayer();
       session.thinkingPlayer = thinkingPlayer;
@@ -803,7 +934,7 @@ export class VoiceConnectionManager {
         const resource = createAudioResource(Readable.from(Buffer.from(audioData)), {
           inlineVolume: true,
         });
-        resource.volume?.setVolume(0.7);
+        resource.volume?.setVolume(volume);
         thinkingPlayer.play(resource);
       };
 
@@ -826,37 +957,6 @@ export class VoiceConnectionManager {
         session.thinkingPlayer = undefined;
         session.connection.subscribe(session.player);
       };
-    }
-  }
-
-  /**
-   * Play thinking sound once (simple version - uses main player, no loop)
-   */
-  private async playThinkingSoundSimple(session: VoiceSession): Promise<void> {
-    try {
-      const fs = await import("node:fs");
-      const path = await import("node:path");
-      const { fileURLToPath } = await import("node:url");
-      
-      const __dirname = path.dirname(fileURLToPath(import.meta.url));
-      const thinkingPath = path.join(__dirname, "..", "assets", "thinking.mp3");
-      
-      if (!fs.existsSync(thinkingPath)) {
-        return;
-      }
-
-      const audioBuffer = fs.readFileSync(thinkingPath);
-      const resource = createAudioResource(Readable.from(audioBuffer), {
-        inlineVolume: true,
-      });
-      resource.volume?.setVolume(0.5);
-      
-      session.player.play(resource);
-      
-      // Don't wait for it to finish - let it play while processing
-      // The response TTS will interrupt it naturally
-    } catch (error) {
-      this.logger.debug?.(`[discord-voice] Error playing thinking sound: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

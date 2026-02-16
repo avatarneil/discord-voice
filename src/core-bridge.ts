@@ -1,5 +1,15 @@
+/**
+ * Core bridge – loads OpenClaw extension API for agent invocation.
+ * Uses the same pattern as the official voice-call plugin:
+ * resolves openclaw package root and imports from dist/extensionAPI.js.
+ *
+ * Requires OpenClaw to be installed (e.g. openclaw gateway). Set OPENCLAW_ROOT
+ * if auto-detection fails.
+ */
+
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { VoiceCallTtsConfig } from "./config.js";
@@ -86,9 +96,10 @@ function findPackageRoot(startDir: string, name: string): string | null {
   }
 }
 
-function resolveClawdbotRoot(): string {
+function resolveOpenClawRoot(overrideRoot?: string): string {
   if (coreRootCache) return coreRootCache;
-  const override = process.env.CLAWDBOT_ROOT?.trim();
+
+  const override = overrideRoot?.trim() || process.env.OPENCLAW_ROOT?.trim();
   if (override) {
     coreRootCache = override;
     return override;
@@ -96,101 +107,85 @@ function resolveClawdbotRoot(): string {
 
   const candidates = new Set<string>();
   if (process.argv[1]) {
-    candidates.add(path.dirname(process.argv[1]));
+    let d = path.dirname(process.argv[1]);
+    for (let i = 0; i < 5 && d; i++) {
+      candidates.add(d);
+      d = path.dirname(d);
+    }
   }
   candidates.add(process.cwd());
   try {
     const urlPath = fileURLToPath(import.meta.url);
-    candidates.add(path.dirname(urlPath));
+    let d = path.dirname(urlPath);
+    for (let i = 0; i < 6 && d; i++) {
+      candidates.add(d);
+      d = path.dirname(d);
+    }
+    // Plugin layout: discord-voice/node_modules/openclaw (e.g. extensions/discord-voice/node_modules/openclaw)
+    const pluginRoot = path.join(path.dirname(urlPath), "..");
+    candidates.add(path.join(pluginRoot, "node_modules", "openclaw"));
   } catch {
     // ignore
   }
+  const stateDir = process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME;
+  if (stateDir) {
+    candidates.add(stateDir);
+    candidates.add(path.dirname(stateDir));
+  }
 
   for (const start of candidates) {
-    const found = findPackageRoot(start, "clawdbot");
+    const found = findPackageRoot(start, "openclaw");
     if (found) {
       coreRootCache = found;
       return found;
     }
   }
 
+  // Fallback: resolve via require (plugin runs inside OpenClaw gateway process)
+  const resolvePaths: string[] = [
+    process.cwd(),
+    path.dirname(fileURLToPath(import.meta.url)),
+  ];
+  if (process.argv[1]) {
+    const scriptDir = path.dirname(process.argv[1]);
+    resolvePaths.push(scriptDir);
+    resolvePaths.push(path.dirname(scriptDir)); // parent (e.g. dist -> pkg root)
+  }
+  if (stateDir) resolvePaths.push(stateDir);
+
+  const require = createRequire(import.meta.url);
+  for (const dir of resolvePaths) {
+    if (!dir) continue;
+    try {
+      const pkgPath = require.resolve("openclaw/package.json", { paths: [dir] });
+      const found = path.dirname(pkgPath);
+      if (fs.existsSync(path.join(found, "dist", "extensionAPI.js"))) {
+        coreRootCache = found;
+        return found;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   throw new Error(
-    "Unable to resolve Clawdbot root. Set CLAWDBOT_ROOT to the package root.",
+    "Unable to resolve OpenClaw root. Set OPENCLAW_ROOT to the package root, or ensure openclaw is installed and the gateway runs from its context.",
   );
 }
 
-async function importCoreModule<T>(relativePath: string): Promise<T> {
-  const root = resolveClawdbotRoot();
-  const distPath = path.join(root, "dist", relativePath);
+async function importCoreExtensionAPI(overrideRoot?: string): Promise<CoreAgentDeps> {
+  const distPath = path.join(resolveOpenClawRoot(overrideRoot), "dist", "extensionAPI.js");
   if (!fs.existsSync(distPath)) {
     throw new Error(
-      `Missing core module at ${distPath}. Run \`pnpm build\` or install the official package.`,
+      `Missing extension API at ${distPath}. Run \`pnpm build\` in OpenClaw or install the official openclaw package.`,
     );
   }
-  return (await import(pathToFileURL(distPath).href)) as T;
+  return (await import(pathToFileURL(distPath).href)) as CoreAgentDeps;
 }
 
-export async function loadCoreAgentDeps(): Promise<CoreAgentDeps> {
+export async function loadCoreAgentDeps(overrideRoot?: string): Promise<CoreAgentDeps> {
   if (coreDepsPromise) return coreDepsPromise;
 
-  coreDepsPromise = (async () => {
-    const [
-      agentScope,
-      defaults,
-      identity,
-      modelSelection,
-      piEmbedded,
-      timeout,
-      workspace,
-      sessions,
-    ] = await Promise.all([
-      importCoreModule<{
-        resolveAgentDir: CoreAgentDeps["resolveAgentDir"];
-        resolveAgentWorkspaceDir: CoreAgentDeps["resolveAgentWorkspaceDir"];
-      }>("agents/agent-scope.js"),
-      importCoreModule<{
-        DEFAULT_MODEL: string;
-        DEFAULT_PROVIDER: string;
-      }>("agents/defaults.js"),
-      importCoreModule<{
-        resolveAgentIdentity: CoreAgentDeps["resolveAgentIdentity"];
-      }>("agents/identity.js"),
-      importCoreModule<{
-        resolveThinkingDefault: CoreAgentDeps["resolveThinkingDefault"];
-      }>("agents/model-selection.js"),
-      importCoreModule<{
-        runEmbeddedPiAgent: CoreAgentDeps["runEmbeddedPiAgent"];
-      }>("agents/pi-embedded.js"),
-      importCoreModule<{
-        resolveAgentTimeoutMs: CoreAgentDeps["resolveAgentTimeoutMs"];
-      }>("agents/timeout.js"),
-      importCoreModule<{
-        ensureAgentWorkspace: CoreAgentDeps["ensureAgentWorkspace"];
-      }>("agents/workspace.js"),
-      importCoreModule<{
-        resolveStorePath: CoreAgentDeps["resolveStorePath"];
-        loadSessionStore: CoreAgentDeps["loadSessionStore"];
-        saveSessionStore: CoreAgentDeps["saveSessionStore"];
-        resolveSessionFilePath: CoreAgentDeps["resolveSessionFilePath"];
-      }>("config/sessions.js"),
-    ]);
-
-    return {
-      resolveAgentDir: agentScope.resolveAgentDir,
-      resolveAgentWorkspaceDir: agentScope.resolveAgentWorkspaceDir,
-      resolveAgentIdentity: identity.resolveAgentIdentity,
-      resolveThinkingDefault: modelSelection.resolveThinkingDefault,
-      runEmbeddedPiAgent: piEmbedded.runEmbeddedPiAgent,
-      resolveAgentTimeoutMs: timeout.resolveAgentTimeoutMs,
-      ensureAgentWorkspace: workspace.ensureAgentWorkspace,
-      resolveStorePath: sessions.resolveStorePath,
-      loadSessionStore: sessions.loadSessionStore,
-      saveSessionStore: sessions.saveSessionStore,
-      resolveSessionFilePath: sessions.resolveSessionFilePath,
-      DEFAULT_MODEL: defaults.DEFAULT_MODEL,
-      DEFAULT_PROVIDER: defaults.DEFAULT_PROVIDER,
-    };
-  })();
-
+  coreDepsPromise = importCoreExtensionAPI(overrideRoot);
   return coreDepsPromise;
 }

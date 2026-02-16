@@ -9,6 +9,13 @@ import { EventEmitter } from "node:events";
 import WebSocket from "ws";
 import type { DiscordVoiceConfig } from "./config.js";
 
+export interface StreamingSTTLogger {
+  info(msg: string): void;
+  warn(msg: string): void;
+  error(msg: string): void;
+  debug?(msg: string): void;
+}
+
 export interface StreamingSTTEvents {
   transcript: (text: string, isFinal: boolean, confidence?: number) => void;
   error: (error: Error) => void;
@@ -56,12 +63,14 @@ export class DeepgramStreamingSTT extends EventEmitter implements StreamingSTTPr
   // Buffer for audio chunks received before connection is ready
   private pendingAudioChunks: Buffer[] = [];
   private maxPendingChunks = 500; // ~5 seconds of audio at 48kHz
+  private logger?: StreamingSTTLogger;
 
   constructor(config: DiscordVoiceConfig, options?: {
     sampleRate?: number;
     interimResults?: boolean;
     endpointing?: number;      // ms of silence to detect end of utterance
     utteranceEndMs?: number;   // ms to wait after utterance end before finalizing
+    logger?: StreamingSTTLogger;
   }) {
     super();
     this.apiKey = config.deepgram?.apiKey || process.env.DEEPGRAM_API_KEY || "";
@@ -75,6 +84,7 @@ export class DeepgramStreamingSTT extends EventEmitter implements StreamingSTTPr
       throw new Error("Deepgram API key required for streaming STT");
     }
 
+    this.logger = options?.logger;
     this.connect();
   }
 
@@ -109,7 +119,7 @@ export class DeepgramStreamingSTT extends EventEmitter implements StreamingSTTPr
       
       // Flush any pending audio chunks that were buffered during connection
       if (this.pendingAudioChunks.length > 0) {
-        console.log(`[streaming-stt] Connection ready, flushing ${this.pendingAudioChunks.length} buffered audio chunks`);
+        this.logger?.info?.(`[streaming-stt] Connection ready, flushing ${this.pendingAudioChunks.length} buffered audio chunks`);
         for (const chunk of this.pendingAudioChunks) {
           this.ws!.send(chunk);
         }
@@ -279,11 +289,13 @@ interface DeepgramMessage {
  */
 export class StreamingSTTManager {
   private config: DiscordVoiceConfig;
+  private logger?: StreamingSTTLogger;
   private sessions: Map<string, DeepgramStreamingSTT> = new Map();
   private pendingTranscripts: Map<string, string> = new Map();
   
-  constructor(config: DiscordVoiceConfig) {
+  constructor(config: DiscordVoiceConfig, logger?: StreamingSTTLogger) {
     this.config = config;
+    this.logger = logger;
   }
 
   /**
@@ -306,6 +318,7 @@ export class StreamingSTTManager {
         interimResults: true,
         endpointing: 300,
         utteranceEndMs: 1000,
+        logger: this.logger,
       });
 
       // Track partial transcripts for this user
@@ -326,7 +339,7 @@ export class StreamingSTTManager {
       });
 
       session.on("error", (err) => {
-        console.error(`[streaming-stt] Error for user ${userId}:`, err.message);
+        this.logger?.error(`[streaming-stt] Error for user ${userId}: ${err.message}`);
       });
 
       this.sessions.set(userId, session);
@@ -388,10 +401,13 @@ export class StreamingSTTManager {
 /**
  * Create streaming STT provider based on config
  */
-export function createStreamingSTTProvider(config: DiscordVoiceConfig): StreamingSTTManager | null {
+export function createStreamingSTTProvider(
+  config: DiscordVoiceConfig,
+  logger?: StreamingSTTLogger
+): StreamingSTTManager | null {
   if (config.sttProvider !== "deepgram") {
     return null;  // Streaming only supported with Deepgram
   }
   
-  return new StreamingSTTManager(config);
+  return new StreamingSTTManager(config, logger);
 }
