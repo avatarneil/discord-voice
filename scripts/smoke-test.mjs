@@ -104,6 +104,11 @@ if (existsSync(sttPath)) {
   } else {
     fail("stt.ts: LocalWhisperSTT or local-whisper case missing");
   }
+  if (sttContent.includes("WyomingWhisperSTT") && sttContent.includes('case "wyoming-whisper"')) {
+    ok("stt.ts: WyomingWhisperSTT and wyoming-whisper provider present");
+  } else {
+    fail("stt.ts: WyomingWhisperSTT or wyoming-whisper case missing");
+  }
 } else {
   fail("src/stt.ts missing");
 }
@@ -113,6 +118,21 @@ if (existsSync(ttsPath)) {
     ok("tts.ts: KokoroTTSProvider and kokoro provider present");
   } else {
     fail("tts.ts: KokoroTTSProvider or kokoro case missing");
+  }
+  if (ttsContent.includes("EdgeTTSProvider") && ttsContent.includes('case "edge"')) {
+    ok("tts.ts: EdgeTTSProvider and edge provider present");
+  } else {
+    fail("tts.ts: EdgeTTSProvider or edge case missing");
+  }
+  if (ttsContent.includes("DeepgramTTS") && ttsContent.includes('case "deepgram"')) {
+    ok("tts.ts: DeepgramTTS and deepgram provider present");
+  } else {
+    fail("tts.ts: DeepgramTTS or deepgram case missing");
+  }
+  if (ttsContent.includes("PollyTTS") && ttsContent.includes('case "polly"')) {
+    ok("tts.ts: PollyTTS and polly provider present");
+  } else {
+    fail("tts.ts: PollyTTS or polly case missing");
   }
 } else {
   fail("src/tts.ts missing");

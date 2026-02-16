@@ -184,21 +184,21 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
 
 Once registered with Discord, use these commands:
 
-- `/voice join <channel>` - Join a voice channel
-- `/voice leave` - Leave the current voice channel
-- `/voice status` - Show voice connection status
+- `/discord_voice join <channel>` - Join a voice channel
+- `/discord_voice leave` - Leave the current voice channel
+- `/discord_voice status` - Show voice connection status
 
 ### CLI Commands
 
 ```bash
 # Join a voice channel
-clawdbot voice join <channelId>
+clawdbot discord_voice join <channelId>
 
 # Leave voice
-clawdbot voice leave --guild <guildId>
+clawdbot discord_voice leave --guild <guildId>
 
 # Check status
-clawdbot voice status
+clawdbot discord_voice status
 ```
 
 ### Agent Tool

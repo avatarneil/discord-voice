@@ -17,6 +17,13 @@ export interface StreamingSTTLogger {
   debug?(msg: string): void;
 }
 
+export interface StreamingSTTLogger {
+  info(msg: string): void;
+  warn(msg: string): void;
+  error(msg: string): void;
+  debug?(msg: string): void;
+}
+
 export interface StreamingSTTEvents {
   transcript: (text: string, isFinal: boolean, confidence?: number) => void;
   error: (error: Error) => void;
@@ -411,6 +418,5 @@ export function createStreamingSTTProvider(
   if (config.sttProvider !== "deepgram") {
     return null; // Streaming only supported with Deepgram
   }
-
   return new StreamingSTTManager(config, logger);
 }

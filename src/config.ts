@@ -17,12 +17,23 @@ export interface DiscordVoiceConfig {
     | "gpt4o-transcribe"
     | "gpt4o-transcribe-diarize"
     | "deepgram"
-    | "local-whisper";
+    | "local-whisper"
+    | "wyoming-whisper";
+  /** Fallback STT providers when primary fails (quota, rate limit, unreachable), tried in order */
+  sttFallbackProviders?: readonly (
+    | "whisper"
+    | "gpt4o-mini"
+    | "gpt4o-transcribe"
+    | "gpt4o-transcribe-diarize"
+    | "deepgram"
+    | "local-whisper"
+    | "wyoming-whisper"
+  )[];
   streamingSTT: boolean; // Use streaming STT (Deepgram only) for lower latency
-  ttsProvider: "openai" | "elevenlabs" | "kokoro";
+  ttsProvider: "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge";
   ttsVoice: string;
-  /** Fallback TTS provider when primary fails (quota, rate limit). E.g. "kokoro" for free local fallback. */
-  ttsFallbackProvider?: "openai" | "elevenlabs" | "kokoro";
+  /** Fallback TTS providers when primary fails (quota, rate limit), tried in order. E.g. ["edge", "kokoro"] */
+  ttsFallbackProviders?: readonly ("openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge")[];
   vadSensitivity: "low" | "medium" | "high";
   bargeIn: boolean; // Stop speaking when user starts talking
   allowedUsers: string[];
@@ -71,10 +82,39 @@ export interface DiscordVoiceConfig {
   deepgram?: {
     apiKey?: string;
     model?: string;
+    /** TTS model (Aura): aura-asteria-en, aura-2-thalia-en, etc. Default: aura-asteria-en */
+    ttsModel?: string;
+  };
+  /** Amazon Polly TTS */
+  polly?: {
+    region?: string;
+    voiceId?: string;
+    engine?: "standard" | "neural" | "long-form" | "generative";
+    accessKeyId?: string;
+    secretAccessKey?: string;
   };
   localWhisper?: {
     model?: string; // e.g., "Xenova/whisper-tiny.en"
     quantized?: boolean;
+  };
+  /** Wyoming Faster Whisper (remote STT over TCP, e.g. wyoming-faster-whisper) */
+  wyomingWhisper?: {
+    host?: string; // default: 127.0.0.1
+    port?: number; // default: 10300
+    uri?: string; // alternative: "host:port" or "tcp://host:port"
+    language?: string; // e.g. "de", "en"
+    connectTimeoutMs?: number;
+  };
+  /** Edge TTS (Microsoft, free, no API key). Default voice: de-DE-KatjaNeural */
+  edge?: {
+    voice?: string;
+    lang?: string;
+    outputFormat?: string;
+    rate?: string;
+    pitch?: string;
+    volume?: string;
+    proxy?: string;
+    timeoutMs?: number;
   };
   kokoro?: {
     modelId?: string;
@@ -220,13 +260,19 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
   const obj = raw as Record<string, unknown>;
 
   const ttsProviderRaw =
-    obj["ttsProvider"] === "elevenlabs"
-      ? "elevenlabs"
-      : obj["ttsProvider"] === "kokoro"
-        ? "kokoro"
-        : obj["ttsProvider"] === "openai"
-          ? "openai"
-          : null;
+    obj["ttsProvider"] === "deepgram"
+      ? "deepgram"
+      : obj["ttsProvider"] === "elevenlabs"
+        ? "elevenlabs"
+        : obj["ttsProvider"] === "polly"
+          ? "polly"
+          : obj["ttsProvider"] === "edge"
+            ? "edge"
+            : obj["ttsProvider"] === "kokoro"
+              ? "kokoro"
+              : obj["ttsProvider"] === "openai"
+                ? "openai"
+                : null;
 
   const ttsVoiceVal = typeof obj["ttsVoice"] === "string" ? obj["ttsVoice"] : null;
   const ttsVoice = ttsVoiceVal ?? fallback.ttsVoice ?? DEFAULT_CONFIG.ttsVoice;
@@ -247,19 +293,67 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
               ? "gpt4o-mini"
               : obj["sttProvider"] === "local-whisper"
                 ? "local-whisper"
-                : "whisper",
+                : obj["sttProvider"] === "wyoming-whisper"
+                  ? "wyoming-whisper"
+                  : "whisper",
     streamingSTT: typeof obj["streamingSTT"] === "boolean" ? obj["streamingSTT"] : DEFAULT_CONFIG.streamingSTT,
-    ttsProvider: (["openai", "elevenlabs", "kokoro"].includes(obj["ttsProvider"] as string)
+    sttFallbackProviders: (() => {
+      const valid = [
+        "whisper",
+        "gpt4o-mini",
+        "gpt4o-transcribe",
+        "gpt4o-transcribe-diarize",
+        "deepgram",
+        "local-whisper",
+        "wyoming-whisper",
+      ] as const;
+      const primary = obj["sttProvider"] as (typeof valid)[number];
+      const excludePrimary = (p: string) => p !== primary;
+      const toProvider = (p: string): (typeof valid)[number] | null =>
+        valid.includes(p as (typeof valid)[number]) ? (p as (typeof valid)[number]) : null;
+
+      const arr = obj["sttFallbackProviders"];
+      if (Array.isArray(arr) && arr.length > 0) {
+        const list = arr
+          .filter((x): x is string => typeof x === "string")
+          .map((p) => toProvider(p))
+          .filter((x): x is (typeof valid)[number] => x !== null)
+          .filter((p) => excludePrimary(p));
+        return list.length > 0 ? list : undefined;
+      }
+      const fb = obj["sttFallbackProvider"];
+      if (typeof fb === "string" && valid.includes(fb as (typeof valid)[number]) && fb !== primary) {
+        return [fb as (typeof valid)[number]];
+      }
+      return undefined;
+    })(),
+    ttsProvider: (["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge"].includes(obj["ttsProvider"] as string)
       ? obj["ttsProvider"]
-      : ttsProviderRaw) as "openai" | "elevenlabs" | "kokoro",
+      : ttsProviderRaw) as "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge",
     ttsVoice,
-    ttsFallbackProvider: (() => {
+    ttsFallbackProviders: (() => {
+      const valid = ["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge"] as const;
       const primary = (
-        ["openai", "elevenlabs", "kokoro"].includes(obj["ttsProvider"] as string) ? obj["ttsProvider"] : ttsProviderRaw
-      ) as "openai" | "elevenlabs" | "kokoro";
+        valid.includes(obj["ttsProvider"] as (typeof valid)[number]) ? obj["ttsProvider"] : ttsProviderRaw
+      ) as (typeof valid)[number];
+      const excludePrimary = (p: string) => p !== primary;
+      const toProvider = (p: string): (typeof valid)[number] | null =>
+        valid.includes(p as (typeof valid)[number]) ? (p as (typeof valid)[number]) : null;
+
+      const arr = obj["ttsFallbackProviders"];
+      if (Array.isArray(arr) && arr.length > 0) {
+        const list = arr
+          .filter((x): x is string => typeof x === "string")
+          .map((p) => toProvider(p))
+          .filter((x): x is (typeof valid)[number] => x !== null)
+          .filter((p) => excludePrimary(p));
+        return list.length > 0 ? list : undefined;
+      }
       const fb = obj["ttsFallbackProvider"];
-      if (!["openai", "elevenlabs", "kokoro"].includes(fb as string)) return undefined;
-      return fb === primary ? undefined : (fb as "openai" | "elevenlabs" | "kokoro");
+      if (typeof fb === "string" && valid.includes(fb as (typeof valid)[number]) && fb !== primary) {
+        return [fb as (typeof valid)[number]];
+      }
+      return undefined;
     })(),
     vadSensitivity: ["low", "medium", "high"].includes(obj["vadSensitivity"] as string)
       ? (obj["vadSensitivity"] as "low" | "medium" | "high")
@@ -328,13 +422,19 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
         modelId: resolveElevenLabsModelId(o?.["modelId"]),
       };
     })(),
-    deepgram:
-      obj["deepgram"] && typeof obj["deepgram"] === "object"
-        ? {
-            apiKey: (obj["deepgram"] as Record<string, unknown>)["apiKey"] as string | undefined,
-            model: ((obj["deepgram"] as Record<string, unknown>)["model"] as string) || "nova-2",
-          }
-        : undefined,
+    deepgram: (() => {
+      const dg =
+        obj["deepgram"] && typeof obj["deepgram"] === "object" ? (obj["deepgram"] as Record<string, unknown>) : null;
+      if (!dg) return undefined;
+      const m = (typeof dg["model"] === "string" ? dg["model"] : "").trim();
+      const tm = (typeof dg["ttsModel"] === "string" ? dg["ttsModel"] : "").trim();
+      const isAura = (s: string) => s.toLowerCase().startsWith("aura-");
+      return {
+        apiKey: dg["apiKey"] as string | undefined,
+        model: isAura(m) ? "nova-2" : m || "nova-2",
+        ttsModel: tm || (isAura(m) ? m : "aura-asteria-en"),
+      };
+    })(),
     localWhisper:
       obj["localWhisper"] && typeof obj["localWhisper"] === "object"
         ? {
@@ -345,12 +445,57 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
                 : true,
           }
         : undefined,
+    wyomingWhisper: (() => {
+      const ww =
+        obj["wyomingWhisper"] && typeof obj["wyomingWhisper"] === "object"
+          ? (obj["wyomingWhisper"] as Record<string, unknown>)
+          : null;
+      if (!ww) return undefined;
+      const uriStr = typeof ww["uri"] === "string" ? (ww["uri"] as string).trim() : "";
+      if (uriStr) {
+        const match = uriStr.match(/^(?:tcp:\/\/)?([^:]+):(\d+)$/);
+        if (match && match[1] !== undefined && match[2] !== undefined) {
+          return {
+            host: match[1].trim(),
+            port: parseInt(match[2], 10),
+            language:
+              typeof ww["language"] === "string" && (ww["language"] as string).trim()
+                ? (ww["language"] as string).trim()
+                : undefined,
+            connectTimeoutMs:
+              typeof ww["connectTimeoutMs"] === "number" && (ww["connectTimeoutMs"] as number) > 0
+                ? (ww["connectTimeoutMs"] as number)
+                : 10000,
+          };
+        }
+      }
+      const host =
+        typeof ww["host"] === "string" && (ww["host"] as string).trim() ? (ww["host"] as string).trim() : "127.0.0.1";
+      const port =
+        typeof ww["port"] === "number" && (ww["port"] as number) > 0 && (ww["port"] as number) <= 65535
+          ? (ww["port"] as number)
+          : 10300;
+      return {
+        host,
+        port,
+        language:
+          typeof ww["language"] === "string" && (ww["language"] as string).trim()
+            ? (ww["language"] as string).trim()
+            : undefined,
+        connectTimeoutMs:
+          typeof ww["connectTimeoutMs"] === "number" && (ww["connectTimeoutMs"] as number) > 0
+            ? (ww["connectTimeoutMs"] as number)
+            : 10000,
+      };
+    })(),
     kokoro:
       obj["kokoro"] && typeof obj["kokoro"] === "object"
         ? {
             modelId: (() => {
               const m = (obj["kokoro"] as Record<string, unknown>)["modelId"];
-              return typeof m === "string" && m.trim() ? m.trim() : "onnx-community/Kokoro-82M-v1.0-ONNX";
+              return typeof m === "string" && (m as string).trim()
+                ? (m as string).trim()
+                : "onnx-community/Kokoro-82M-v1.0-ONNX";
             })(),
             dtype: (["fp32", "fp16", "q8", "q4", "q4f16"].includes(
               (obj["kokoro"] as Record<string, unknown>)["dtype"] as string,
@@ -364,6 +509,49 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
                 : "af_heart",
           }
         : undefined,
+    edge: (() => {
+      const e = obj["edge"] && typeof obj["edge"] === "object" ? (obj["edge"] as Record<string, unknown>) : null;
+      if (!e) return undefined;
+      return {
+        voice:
+          typeof e["voice"] === "string" && (e["voice"] as string).trim()
+            ? String(e["voice"]).trim()
+            : "de-DE-KatjaNeural",
+        lang: typeof e["lang"] === "string" && (e["lang"] as string).trim() ? String(e["lang"]).trim() : "de-DE",
+        outputFormat:
+          typeof e["outputFormat"] === "string" && (e["outputFormat"] as string).trim()
+            ? String(e["outputFormat"]).trim()
+            : "webm-24khz-16bit-mono-opus",
+        rate: typeof e["rate"] === "string" && (e["rate"] as string).trim() ? String(e["rate"]).trim() : undefined,
+        pitch: typeof e["pitch"] === "string" && (e["pitch"] as string).trim() ? String(e["pitch"]).trim() : undefined,
+        volume:
+          typeof e["volume"] === "string" && (e["volume"] as string).trim() ? String(e["volume"]).trim() : undefined,
+        proxy: typeof e["proxy"] === "string" && (e["proxy"] as string).trim() ? String(e["proxy"]).trim() : undefined,
+        timeoutMs:
+          typeof e["timeoutMs"] === "number" && (e["timeoutMs"] as number) >= 0
+            ? (e["timeoutMs"] as number)
+            : undefined,
+      };
+    })(),
+    polly: (() => {
+      const p = obj["polly"] && typeof obj["polly"] === "object" ? (obj["polly"] as Record<string, unknown>) : null;
+      if (!p) return undefined;
+      return {
+        region:
+          typeof p["region"] === "string" && (p["region"] as string).trim() ? String(p["region"]).trim() : undefined,
+        voiceId:
+          typeof p["voiceId"] === "string" && (p["voiceId"] as string).trim() ? String(p["voiceId"]).trim() : "Joanna",
+        engine: ["standard", "neural", "long-form", "generative"].includes(p["engine"] as string)
+          ? (p["engine"] as "standard" | "neural" | "long-form" | "generative")
+          : undefined,
+        accessKeyId:
+          typeof p["accessKeyId"] === "string" && (p["accessKeyId"] as string).trim()
+            ? String(p["accessKeyId"]).trim()
+            : undefined,
+        secretAccessKey:
+          typeof p["secretAccessKey"] === "string" && p["secretAccessKey"] ? String(p["secretAccessKey"]) : undefined,
+      };
+    })(),
     thinkingSound: (() => {
       const t =
         obj["thinkingSound"] && typeof obj["thinkingSound"] === "object"
@@ -376,10 +564,14 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
           ? (t["path"] as string).trim()
           : "assets/thinking.mp3";
       let volume = 0.7;
-      if (typeof t["volume"] === "number" && t["volume"] >= 0 && t["volume"] <= 1) volume = t["volume"];
+      if (typeof t["volume"] === "number" && t["volume"] >= 0 && t["volume"] <= 1) volume = t["volume"] as number;
       let stopDelayMs = 50;
-      if (typeof t["stopDelayMs"] === "number" && t["stopDelayMs"] >= 0 && t["stopDelayMs"] <= 500)
-        stopDelayMs = t["stopDelayMs"];
+      if (
+        typeof t["stopDelayMs"] === "number" &&
+        (t["stopDelayMs"] as number) >= 0 &&
+        (t["stopDelayMs"] as number) <= 500
+      )
+        stopDelayMs = t["stopDelayMs"] as number;
       return { enabled, path, volume, stopDelayMs };
     })(),
   };
@@ -417,6 +609,47 @@ export function validateDeepgramModel(model: string): string {
 export function validateElevenLabsVoiceId(voiceId: string): string {
   if (ELEVENLABS_VOICE_ID_RE.test(voiceId)) return voiceId;
   return "21m00Tcm4TlvDq8ikWAM"; // default: Rachel
+}
+
+/**
+ * Extract available model IDs from OpenClaw main config (agents.list, agents.defaults).
+ * Used for validation/suggestions when setting voice model at runtime.
+ */
+export function getAvailableModels(main: MainConfig | undefined): string[] {
+  const seen = new Set<string>();
+  const add = (s: string | undefined) => {
+    if (typeof s === "string" && s.trim()) {
+      const t = s.trim();
+      if (t && !seen.has(t)) seen.add(t);
+    }
+  };
+
+  if (!main || typeof main !== "object") return [];
+
+  const m = main as Record<string, unknown>;
+  const agents = m["agents"] as Record<string, unknown> | undefined;
+  const defaults = agents?.["defaults"] as Record<string, unknown> | undefined;
+  const defModel = defaults?.["model"];
+  if (typeof defModel === "string") add(defModel);
+  else if (defModel && typeof defModel === "object" && "primary" in defModel) {
+    add((defModel as { primary?: string }).primary);
+  }
+
+  const list = agents?.["list"] as unknown[] | undefined;
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      if (item && typeof item === "object") {
+        const o = item as Record<string, unknown>;
+        const model = o["model"];
+        if (typeof model === "string") add(model);
+        else if (model && typeof model === "object" && "primary" in model) {
+          add((model as { primary?: string }).primary);
+        }
+      }
+    }
+  }
+
+  return [...seen];
 }
 
 /**

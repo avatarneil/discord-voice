@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Streaming TTS for real-time audio playback
 - Barge-in support to interrupt bot responses
 - Auto-reconnect with heartbeat monitoring
-- Discord slash commands: `/voice join`, `/voice leave`, `/voice status`
+- Discord slash commands: `/discord_voice join`, `/discord_voice leave`, `/discord_voice status`
 - CLI commands for voice management
 - Agent tool `discord_voice` for programmatic control
 - Configurable VAD sensitivity (low/medium/high)

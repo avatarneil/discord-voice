@@ -128,23 +128,26 @@ export class ElevenLabsStreamingTTS implements StreamingTTSProvider {
 
   async synthesizeStream(text: string): Promise<StreamingTTSResult> {
     // Use the streaming endpoint
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.voiceId)}/stream`, {
-      method: "POST",
-      headers: {
-        "xi-api-key": this.apiKey,
-        "Content-Type": "application/json",
-        Accept: "audio/mpeg",
-      },
-      body: JSON.stringify({
-        text,
-        model_id: this.modelId,
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.voiceId)}/stream`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": this.apiKey,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg",
         },
-        optimize_streaming_latency: 3, // 0-4, higher = lower latency but quality tradeoff
-      }),
-    });
+        body: JSON.stringify({
+          text,
+          model_id: this.modelId,
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+          },
+          optimize_streaming_latency: 3, // 0-4, higher = lower latency but quality tradeoff
+        }),
+      },
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -176,8 +179,11 @@ export function createStreamingTTSProvider(config: DiscordVoiceConfig): Streamin
       return new ElevenLabsStreamingTTS(config);
     case "openai":
       return new OpenAIStreamingTTS(config);
+    case "deepgram":
+    case "polly":
+    case "edge":
     case "kokoro":
-      return null; // Kokoro has no streaming – batch TTS used directly
+      return null; // Batch-only providers (no streaming)
     default:
       return new OpenAIStreamingTTS(config);
   }

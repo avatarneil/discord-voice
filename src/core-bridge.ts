@@ -164,7 +164,6 @@ async function importCoreExtensionAPI(overrideRoot?: string): Promise<CoreAgentD
       `Missing extension API at ${distPath}. Run \`pnpm build\` in OpenClaw or install the official openclaw package.`,
     );
   }
-
   // Verify the resolved path belongs to an actual openclaw package (prevents loading arbitrary code)
   const pkgJsonPath = path.join(root, "package.json");
   if (!fs.existsSync(pkgJsonPath)) {
