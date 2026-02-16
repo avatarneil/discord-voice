@@ -87,8 +87,10 @@ function resolveOpenClawRoot(overrideRoot?: string): string {
 
   const override = overrideRoot?.trim() || process.env["OPENCLAW_ROOT"]?.trim();
   if (override) {
-    coreRootCache = override;
-    return override;
+    // Normalize and resolve the override to prevent path traversal via ../ sequences
+    const resolved = path.resolve(override);
+    coreRootCache = resolved;
+    return resolved;
   }
 
   const candidates = new Set<string>();

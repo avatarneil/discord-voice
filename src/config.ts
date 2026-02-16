@@ -144,6 +144,24 @@ export const DEFAULT_CONFIG: DiscordVoiceConfig = {
 /** Default text for noEmojiHint when true */
 export const DEFAULT_NO_EMOJI_HINT = "Do not use emojis—your response will be read aloud by a TTS engine.";
 
+/** Maximum length for custom noEmojiHint strings (prevents excessive prompt bloat) */
+const MAX_NO_EMOJI_HINT_LENGTH = 500;
+
+/**
+ * Sanitize a custom noEmojiHint string:
+ * - Strip control characters (except common whitespace)
+ * - Enforce length limit
+ */
+export function sanitizeNoEmojiHint(raw: string): string {
+  // Strip control characters except spaces, tabs, and newlines
+  // eslint-disable-next-line no-control-regex
+  const cleaned = raw.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").trim();
+  if (cleaned.length > MAX_NO_EMOJI_HINT_LENGTH) {
+    return cleaned.slice(0, MAX_NO_EMOJI_HINT_LENGTH);
+  }
+  return cleaned;
+}
+
 /** ElevenLabs model shorthands → full model IDs */
 export const ELEVENLABS_MODELS = {
   turbo: "eleven_turbo_v2_5",
@@ -394,7 +412,7 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
     noEmojiHint: (() => {
       if (obj["noEmojiHint"] === false) return false;
       const s = obj["noEmojiHint"];
-      if (typeof s === "string" && s.trim()) return s.trim();
+      if (typeof s === "string" && s.trim()) return sanitizeNoEmojiHint(s);
       return true;
     })(),
     openai: (() => {
