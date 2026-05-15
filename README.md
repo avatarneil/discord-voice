@@ -22,6 +22,7 @@ Real-time voice conversations in Discord voice channels. Join a voice channel, s
 - System dependencies for voice:
   - `ffmpeg` (audio processing)
   - Native build tools for `@discordjs/opus` and `sodium-native`
+- **DAVE (voice 0.19+)**: The npm dependency `@snazzah/davey` is required so the voice connection can complete the DAVE handshake and reach Ready. Without it, join may stall at "Connecting" or "Signalling" ([discordjs/discord.js#11439](https://github.com/discordjs/discord.js/issues/11439)).
 
 ## Installation
 
@@ -131,6 +132,10 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
 | `maxRecordingMs`       | number            | `30000`                               | Max recording length (ms)                                                                                                                                                                     |
 | `heartbeatIntervalMs`  | number            | `30000`                               | Connection health check interval                                                                                                                                                              |
 | `autoJoinChannel`      | string            | `undefined`                           | Channel ID to auto-join on startup                                                                                                                                                            |
+| `voiceReadyTimeoutMs` | number            | `30000`                               | Timeout (ms) for voice connection to reach Ready; increase if join often times out (e.g. after OpenClaw updates or on slow networks)                                                          |
+| `voiceDebug`          | boolean           | `false`                               | Enable @discordjs/voice debug messages (WebSocket/UDP handshake) for troubleshooting                                                                                                          |
+| `daveEncryption`      | boolean           | (library default)                     | DAVE end-to-end encryption (0.19+); set `false` to disable                                                                                                                                    |
+| `decryptionFailureTolerance` | number    | (library default: 24)                 | DAVE decryption failures before re-init (0.19+)                                                                                                                                               |
 | `openclawRoot`         | string            | `undefined`                           | OpenClaw package root if auto-detection fails                                                                                                                                                 |
 | `thinkingSound`        | object            | see [Thinking Sound](#thinking-sound) | Sound played while processing                                                                                                                                                                 |
 | `noEmojiHint`          | boolean \| string | `true`                                | Inject TTS hint into agent prompt; when set, emojis are also stripped from responses before TTS (avoids Kokoro reading them aloud)                                                            |
@@ -320,6 +325,19 @@ When the primary STT fails (quota, rate limit, or Wyoming unreachable), fallback
   wyomingWhisper: { host: "192.168.1.10", port: 10300 },
 }
 ```
+
+### Voice: join fails or never reaches Ready
+
+- **Install `@snazzah/davey`** (listed in package.json). Without it, the DAVE handshake fails after OP 8 (Hello) and the connection never reaches Ready. See [discordjs/discord.js#11439](https://github.com/discordjs/discord.js/issues/11439).
+- **Use @discordjs/voice 0.19.x with DAVE enabled.** In many environments the connection only reaches Ready when `daveEncryption` is true (or omitted); with DAVE disabled, the UDP handshake may never complete (Discord/library behavior).
+- Prefer a single Discord client: OpenClaw should expose the client via `api.runtime.discord.getClient()` so the plugin does not run a second client (two connections with the same token can prevent voice from reaching Ready).
+- **voiceDebug: true** enables @discordjs/voice debug logs (WebSocket/UDP). **voiceReadyTimeoutMs**: increase (e.g. 45000) if join often times out.
+- Allow outbound UDP; try `NODE_OPTIONS=--dns-result-order=ipv4first` if IPv6 causes issues. Minimal test: `node scripts/voice-test.mjs <TOKEN> <CHANNEL_ID>`.
+- This plugin uses `guild.voiceAdapterCreator` (standard discord.js). OpenClaw's built-in voice uses Carbon's `getGatewayAdapterCreator()`. See [openclaw#23283](https://github.com/openclaw/openclaw/issues/23283), [openclaw#23982](https://github.com/openclaw/openclaw/issues/23982) for Carbon adapter issues.
+
+### DAVE: receive error DecryptionFailed (UnencryptedWhenPassthroughDisabled)
+
+When someone speaks, you may see `Failed to decrypt a packet` then `DecryptionFailed(UnencryptedWhenPassthroughDisabled)`. The plugin **automatically rejoins once** on this error to get a fresh DAVE session ([openclaw#25909](https://github.com/openclaw/openclaw/pull/25909)). If it keeps failing, try higher `decryptionFailureTolerance` or see [openclaw#23105](https://github.com/openclaw/openclaw/issues/23105), [discordjs/voice](https://github.com/discordjs/voice).
 
 ## Usage
 

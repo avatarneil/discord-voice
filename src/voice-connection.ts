@@ -71,6 +71,16 @@ function isRetryableTtsError(error: unknown): boolean {
   );
 }
 
+/** DAVE receive errors: unencrypted packets during key exchange (UnencryptedWhenPassthroughDisabled). Recovery: rejoin channel. */
+function isDaveDecryptionError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.includes("DecryptionFailed") ||
+    msg.includes("UnencryptedWhenPassthroughDisabled") ||
+    msg.includes("Failed to decrypt")
+  );
+}
+
 /** Detect STT errors that warrant trying a fallback (quota, rate limit, connection, Wyoming unreachable) */
 function isRetryableSttError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
@@ -115,6 +125,8 @@ export interface VoiceSession {
   guildId: string;
   channelId: string;
   channelName?: string;
+  /** Stored for DAVE recovery rejoin; set when joining */
+  channel?: VoiceBasedChannel;
   connection: VoiceConnection;
   player: AudioPlayer;
   userAudioStates: Map<string, UserAudioState>;
@@ -126,6 +138,8 @@ export interface VoiceSession {
   heartbeatInterval?: ReturnType<typeof setInterval>;
   lastHeartbeat?: number;
   reconnecting?: boolean;
+  /** Set when a DAVE decryption error triggered a scheduled rejoin (avoid multiple rejoins) */
+  daveRecoveryScheduled?: boolean;
   /** Fallback TTS provider to use for rest of session (set after primary fails with quota/rate limit) */
   fallbackTtsProvider?: "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge";
   /** Fallback STT provider to use for rest of session (set after primary fails) */
@@ -225,12 +239,55 @@ export class VoiceConnectionManager {
 
     this.ensureProviders();
 
-    const connection = joinVoiceChannel({
+    const debugVoice = this.config.voiceDebug ?? false;
+    const daveEncryption = this.config.daveEncryption ?? true;
+    const decryptionFailureTolerance = this.config.decryptionFailureTolerance ?? 24;
+    const joinOptions = {
       channelId: channel.id,
       guildId: channel.guildId,
       adapterCreator: channel.guild.voiceAdapterCreator,
-      selfDeaf: false, // We need to hear users
+      selfDeaf: false,
       selfMute: false,
+      debug: debugVoice,
+      daveEncryption,
+      decryptionFailureTolerance,
+    };
+    this.logger.info(
+      `[discord-voice] DAVE: encryption=${daveEncryption} tolerance=${decryptionFailureTolerance}`,
+    );
+    const connection = joinVoiceChannel(
+      joinOptions as Parameters<typeof joinVoiceChannel>[0],
+    );
+
+    if (debugVoice) {
+      connection.on("debug", (message: string) =>
+        this.logger.info(`[discord-voice] voice: ${message}`),
+      );
+    }
+
+    connection.on("error", (err: Error) => {
+      this.logger.error(
+        `[discord-voice] Voice connection error (before Ready): ${err.message}${err.cause ? ` (cause: ${String((err as Error & { cause?: unknown }).cause)})` : ""}`,
+      );
+    });
+
+    // Log every state transition to diagnose "never Ready"
+    this.logger.info(`[discord-voice] Voice initial state: ${connection.state.status}`);
+    connection.on("stateChange", (oldState, newState) => {
+      const prev = oldState.status;
+      const next = newState.status;
+      this.logger.info(`[discord-voice] Voice state: ${prev} → ${next}`);
+      // connecting → signalling usually means UDP to Discord voice server failed (firewall/NAT/route)
+      if (prev === VoiceConnectionStatus.Connecting && next === VoiceConnectionStatus.Signalling) {
+        this.logger.warn(
+          "[discord-voice] Voice fell back from Connecting to Signalling (UDP handshake likely failed). Check outbound UDP, NAT, and that the host can reach Discord voice IPs.",
+        );
+      }
+      // Log disconnect reason if present (AdapterUnavailable, WebSocketClose, etc.)
+      const stateWithReason = newState as { status: string; reason?: number };
+      if (stateWithReason.reason !== undefined) {
+        this.logger.info(`[discord-voice] Voice disconnect reason: ${stateWithReason.reason}`);
+      }
     });
 
     const player = createAudioPlayer();
@@ -240,6 +297,7 @@ export class VoiceConnectionManager {
       guildId: channel.guildId,
       channelId: channel.id,
       channelName: channel.name,
+      channel,
       connection,
       player,
       userAudioStates: new Map(),
@@ -250,14 +308,20 @@ export class VoiceConnectionManager {
 
     this.sessions.set(channel.guildId, session);
 
-    // Wait for the connection to be ready
+    // Wait for the connection to be ready (configurable; default 30s for slow networks)
+    const readyTimeoutMs = this.config.voiceReadyTimeoutMs ?? 30_000;
+    this.logger.info(`[discord-voice] Waiting for voice Ready (timeout ${readyTimeoutMs}ms)...`);
     try {
-      await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+      await entersState(connection, VoiceConnectionStatus.Ready, readyTimeoutMs);
       this.logger.info(`[discord-voice] Joined voice channel ${channel.name} in ${channel.guild.name}`);
     } catch (error) {
       connection.destroy();
       this.sessions.delete(channel.guildId);
-      throw new Error(`Failed to join voice channel: ${error}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[discord-voice] Voice connection did not reach Ready within ${readyTimeoutMs}ms. If this persists, try increasing voiceReadyTimeoutMs or check firewall/UDP.`,
+      );
+      throw new Error(`Failed to join voice channel: ${msg}`);
     }
 
     // Start listening to users
@@ -278,10 +342,13 @@ export class VoiceConnectionManager {
   private setupConnectionHandlers(session: VoiceSession, channel: VoiceBasedChannel): void {
     const connection = session.connection;
 
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    connection.on(VoiceConnectionStatus.Disconnected, async (oldState?: unknown, newState?: { reason?: number }) => {
       if (session.reconnecting) return;
 
-      this.logger.warn(`[discord-voice] Disconnected from voice channel in ${channel.guild.name}`);
+      const reason = newState?.reason;
+      this.logger.warn(
+        `[discord-voice] Disconnected from voice channel in ${channel.guild.name}${reason !== undefined ? ` (reason: ${reason})` : ""}`,
+      );
 
       try {
         // Try to reconnect within 5 seconds
@@ -313,11 +380,13 @@ export class VoiceConnectionManager {
   private async attemptReconnect(session: VoiceSession, channel: VoiceBasedChannel, attempt = 1): Promise<void> {
     if (attempt > this.MAX_RECONNECT_ATTEMPTS) {
       this.logger.error(`[discord-voice] Max reconnection attempts reached, giving up`);
+      session.daveRecoveryScheduled = false;
       await this.leave(session.guildId);
       return;
     }
 
     session.reconnecting = true;
+    session.daveRecoveryScheduled = false;
     this.logger.info(`[discord-voice] Reconnection attempt ${attempt}/${this.MAX_RECONNECT_ATTEMPTS}`);
 
     try {
@@ -327,14 +396,28 @@ export class VoiceConnectionManager {
       // Wait before reconnecting (exponential backoff)
       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
 
-      // Create new connection
-      const newConnection = joinVoiceChannel({
+      // Create new connection (same DAVE options as join)
+      const debugVoice = this.config.voiceDebug ?? false;
+      const daveEncryption = this.config.daveEncryption ?? true;
+      const decryptionFailureTolerance = this.config.decryptionFailureTolerance ?? 24;
+      const rejoinOptions = {
         channelId: channel.id,
         guildId: channel.guildId,
         adapterCreator: channel.guild.voiceAdapterCreator,
         selfDeaf: false,
         selfMute: false,
-      });
+        debug: debugVoice,
+        daveEncryption,
+        decryptionFailureTolerance,
+      };
+      const newConnection = joinVoiceChannel(
+        rejoinOptions as Parameters<typeof joinVoiceChannel>[0],
+      );
+      if (debugVoice) {
+        newConnection.on("debug", (message: string) =>
+          this.logger.info(`[discord-voice] voice: ${message}`),
+        );
+      }
 
       const newPlayer = createAudioPlayer();
       newConnection.subscribe(newPlayer);
@@ -344,10 +427,12 @@ export class VoiceConnectionManager {
       session.player = newPlayer;
 
       // Wait for ready
-      await entersState(newConnection, VoiceConnectionStatus.Ready, 20_000);
+      const readyTimeoutMs = this.config.voiceReadyTimeoutMs ?? 30_000;
+      await entersState(newConnection, VoiceConnectionStatus.Ready, readyTimeoutMs);
 
       session.reconnecting = false;
       session.lastHeartbeat = Date.now();
+      session.channel = channel;
 
       // Restart listening
       this.startListening(session);
@@ -362,6 +447,24 @@ export class VoiceConnectionManager {
       );
       await this.attemptReconnect(session, channel, attempt + 1);
     }
+  }
+
+  /**
+   * On DAVE receive decryption failure (e.g. UnencryptedWhenPassthroughDisabled), rejoin once to get a fresh session.
+   * OpenClaw uses the same approach (openclaw/openclaw#25909).
+   */
+  private scheduleRejoinForDaveRecovery(session: VoiceSession): void {
+    if (session.reconnecting || session.daveRecoveryScheduled) return;
+    const channel = session.channel;
+    if (!channel) {
+      this.logger.warn(`[discord-voice] DAVE decryption error but no channel stored; cannot rejoin`);
+      return;
+    }
+    session.daveRecoveryScheduled = true;
+    this.logger.info(
+      `[discord-voice] DAVE receive decryption failed — rejoining channel to get a fresh session (once)`,
+    );
+    void this.attemptReconnect(session, channel);
   }
 
   /**
@@ -583,6 +686,10 @@ export class VoiceConnectionManager {
     // Handle stream errors to prevent crashes
     opusStream.on("error", (error) => {
       this.logger.error(`[discord-voice] AudioReceiveStream error for user ${userId}: ${error.message}`);
+      // DAVE: unencrypted packets during key exchange can cause DecryptionFailed. Rejoin to get a fresh DAVE session.
+      if (isDaveDecryptionError(error)) {
+        this.scheduleRejoinForDaveRecovery(session);
+      }
     });
 
     state.opusStream = opusStream;

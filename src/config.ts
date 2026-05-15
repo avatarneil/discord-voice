@@ -41,6 +41,14 @@ export interface DiscordVoiceConfig {
   minAudioMs: number;
   maxRecordingMs: number;
   autoJoinChannel?: string; // Channel ID to auto-join on startup
+  /** Timeout in ms for voice connection to reach Ready (default 30000). Increase if join often times out. */
+  voiceReadyTimeoutMs?: number;
+  /** If true, enable @discordjs/voice debug messages (WebSocket/UDP handshake etc.) for troubleshooting. */
+  voiceDebug?: boolean;
+  /** DAVE (Discord Audio Video Encryption): set to false to disable ( @discordjs/voice 0.19+ ). OpenClaw uses this. */
+  daveEncryption?: boolean;
+  /** DAVE decryption failure tolerance before re-init ( @discordjs/voice 0.19+ ). Default in library: 24. */
+  decryptionFailureTolerance?: number;
   heartbeatIntervalMs?: number; // Connection health check interval
   /** OpenClaw package root (if auto-detection fails); path to openclaw package dir containing dist/extensionAPI.js */
   openclawRoot?: string;
@@ -136,6 +144,7 @@ export const DEFAULT_CONFIG: DiscordVoiceConfig = {
   silenceThresholdMs: 800, // 800ms - snappy response after speech ends
   minAudioMs: 300, // 300ms minimum - filter very short noise
   maxRecordingMs: 30000,
+  voiceReadyTimeoutMs: 30000, // 30s for slow networks / after OpenClaw updates
   heartbeatIntervalMs: 30000,
   // model: undefined - uses system default, recommend "anthropic/claude-3-5-haiku-latest" for speed
   // thinkLevel: undefined - defaults to "off" for voice (fastest)
@@ -396,6 +405,21 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
     autoJoinChannel:
       typeof obj["autoJoinChannel"] === "string" && obj["autoJoinChannel"].trim()
         ? obj["autoJoinChannel"].trim()
+        : undefined,
+    voiceReadyTimeoutMs: (() => {
+      const v =
+        typeof obj["voiceReadyTimeoutMs"] === "number"
+          ? obj["voiceReadyTimeoutMs"]
+          : DEFAULT_CONFIG.voiceReadyTimeoutMs;
+      const def = DEFAULT_CONFIG.voiceReadyTimeoutMs ?? 30_000;
+      return typeof v === "number" && v > 0 ? v : def;
+    })(),
+    voiceDebug: typeof obj["voiceDebug"] === "boolean" ? obj["voiceDebug"] : false,
+    daveEncryption:
+      typeof obj["daveEncryption"] === "boolean" ? obj["daveEncryption"] : undefined,
+    decryptionFailureTolerance:
+      typeof obj["decryptionFailureTolerance"] === "number" && obj["decryptionFailureTolerance"] >= 0
+        ? obj["decryptionFailureTolerance"]
         : undefined,
     openclawRoot:
       typeof obj["openclawRoot"] === "string" && obj["openclawRoot"].trim() ? obj["openclawRoot"].trim() : undefined,

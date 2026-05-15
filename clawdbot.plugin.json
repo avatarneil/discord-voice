@@ -101,6 +101,10 @@
         "description": "Connection health check interval in ms"
       },
       "autoJoinChannel": { "type": "string", "description": "Voice channel ID to auto-join on startup" },
+      "voiceReadyTimeoutMs": { "type": "number", "default": 30000, "description": "Timeout in ms for voice Ready; increase if join times out" },
+      "voiceDebug": { "type": "boolean", "default": false, "description": "Enable voice library debug (WebSocket/UDP) for troubleshooting" },
+      "daveEncryption": { "type": "boolean", "description": "DAVE encryption (0.19+); set false to disable" },
+      "decryptionFailureTolerance": { "type": "number", "description": "DAVE decryption tolerance (0.19+), default 24" },
       "openclawRoot": { "type": "string", "description": "OpenClaw package root if auto-detection fails" },
       "thinkingSound": {
         "type": "object",

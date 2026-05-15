@@ -5,6 +5,17 @@ All notable changes to the Discord Voice Plugin for Clawdbot will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-02-13
+
+### Fixed
+
+- **Voice join / DAVE**: Add `@snazzah/davey` dependency so the voice connection can complete the DAVE handshake and reach Ready. Without it, join could stall at Connecting/Signalling ([discordjs/discord.js#11439](https://github.com/discordjs/discord.js/issues/11439)).
+- Pass DAVE options explicitly on join and rejoin (`daveEncryption`, `decryptionFailureTolerance`) so the library uses the intended values.
+
+### Changed
+
+- `libsodium-wrappers` updated from `~0.7.15` to `^0.8.2` (compatible with davey).
+
 ## [0.1.0] - 2026-01-26
 
 ### Added

@@ -13,6 +13,7 @@
  */
 
 import crypto from "node:crypto";
+import dns from "node:dns";
 import { Type } from "@sinclair/typebox";
 import { Client, GatewayIntentBits, type VoiceBasedChannel } from "discord.js";
 
@@ -134,6 +135,16 @@ const discordVoicePlugin = {
   },
 
   register(api: PluginApi) {
+    // Prefer IPv4 for DNS so voice server UDP uses IPv4 (avoids udp:false when host has no IPv6)
+    try {
+      if (typeof (dns as { setDefaultResultOrder?: (order: string) => void }).setDefaultResultOrder === "function") {
+        (dns as { setDefaultResultOrder: (order: string) => void }).setDefaultResultOrder("ipv4first");
+        api.logger.info("[discord-voice] DNS result order set to ipv4first (Node 17+).");
+      }
+    } catch {
+      // ignore on older Node or unsupported env
+    }
+
     if (discordVoiceRegistered) {
       api.logger.warn(
         "[discord-voice] Plugin already registered (likely loaded via both openclaw and clawdbot extensions). Skipping duplicate init to prevent double processing.",
@@ -177,41 +188,119 @@ const discordVoicePlugin = {
       return;
     }
 
-    // Create our own Discord client with voice intents
-    discordClient = new Client({
-      intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages],
-    });
+    // Shared auto-join logic (used for both own client and OpenClaw's client)
+    const runAutoJoinIfConfigured = async () => {
+      if (!cfg.autoJoinChannel || !discordClient) return;
+      const doAutoJoin = async (attempt: number) => {
+        api.logger.info(
+          `[discord-voice] Auto-join: channel ${cfg.autoJoinChannel} (attempt ${attempt}), waiting 2s for init…`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    discordClient.once("ready", async () => {
-      clientReady = true;
-      api.logger.info(`[discord-voice] Discord client ready as ${discordClient?.user?.tag}`);
+        const channel = await discordClient!.channels.fetch(cfg.autoJoinChannel!);
+        if (!channel) {
+          api.logger.warn(
+            `[discord-voice] Auto-join: channel ${cfg.autoJoinChannel} not found (no access or invalid ID)`,
+          );
+          return;
+        }
+        if (!channel.isVoiceBased()) {
+          api.logger.warn(`[discord-voice] Auto-join: channel ${cfg.autoJoinChannel} is not a voice channel`);
+          return;
+        }
+        api.logger.info(
+          `[discord-voice] Auto-join: fetching channel ok, joining "${channel.name}" (${channel.guild.name})…`,
+        );
+        const vm = ensureVoiceManager();
+        await vm.join(channel as VoiceBasedChannel);
+        api.logger.info(`[discord-voice] Auto-joined voice channel: ${channel.name}`);
+      };
 
-      // Auto-join channel if configured
-      if (cfg.autoJoinChannel) {
+      try {
+        await doAutoJoin(1);
+      } catch (error) {
+        api.logger.warn(
+          `[discord-voice] Auto-join failed (first try): ${error instanceof Error ? error.message : String(error)}`,
+        );
         try {
-          api.logger.info(`[discord-voice] Auto-joining channel ${cfg.autoJoinChannel}`);
-          // Wait a moment for everything to initialize
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-
-          const channel = await discordClient!.channels.fetch(cfg.autoJoinChannel);
-          if (channel && channel.isVoiceBased()) {
-            const vm = ensureVoiceManager();
-            await vm.join(channel as VoiceBasedChannel);
-            api.logger.info(`[discord-voice] Auto-joined voice channel: ${channel.name}`);
-          } else {
-            api.logger.warn(`[discord-voice] Auto-join channel ${cfg.autoJoinChannel} is not a voice channel`);
-          }
-        } catch (error) {
+          api.logger.info(`[discord-voice] Auto-join: retrying in 5s…`);
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+          await doAutoJoin(2);
+        } catch (retryError) {
           api.logger.error(
-            `[discord-voice] Failed to auto-join: ${error instanceof Error ? error.message : String(error)}`,
+            `[discord-voice] Auto-join failed after retry: ${retryError instanceof Error ? retryError.message : String(retryError)}`,
           );
         }
       }
-    });
+    };
 
-    discordClient.login(discordToken).catch((err) => {
-      api.logger.error(`[discord-voice] Failed to login: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    // Prefer OpenClaw's Discord client (single gateway → voice Ready works). getClient() may be null at register
+    // if the Discord gateway starts after this plugin; retry a few times before creating a second connection.
+    const attachToOpenClawClient = (client: Client) => {
+      discordClient = client;
+      if (discordClient.isReady()) {
+        clientReady = true;
+        api.logger.info(
+          "[discord-voice] Using OpenClaw's Discord client (already ready); one connection for gateway + voice.",
+        );
+        void runAutoJoinIfConfigured();
+      } else {
+        api.logger.info("[discord-voice] Using OpenClaw's Discord client (waiting for ready).");
+        discordClient.once("clientReady" as "ready", () => {
+          clientReady = true;
+          api.logger.info(`[discord-voice] Discord client ready as ${discordClient?.user?.tag}`);
+          void runAutoJoinIfConfigured();
+        });
+      }
+    };
+
+    const tryGetClient = (): Client | null =>
+      api.runtime?.discord?.getClient?.() ?? api.runtime?.discord?.getClient?.("default") ?? null;
+
+    const existingClient = tryGetClient();
+    if (existingClient) {
+      attachToOpenClawClient(existingClient);
+    } else {
+      // Discord gateway may start after us; wait so we don't create a second client (same token → voice never Ready)
+      const maxWaitMs = 18_000;
+      const intervalMs = 2_000;
+      let elapsed = 0;
+      api.logger.info(
+        "[discord-voice] OpenClaw Discord client not available; will retry getClient() / getClient('default') for 18s.",
+      );
+      const id = setInterval(() => {
+        if (discordClient) {
+          clearInterval(id);
+          return;
+        }
+        const client = tryGetClient();
+        if (client) {
+          clearInterval(id);
+          attachToOpenClawClient(client);
+          return;
+        }
+        elapsed += intervalMs;
+        if (elapsed >= maxWaitMs) {
+          clearInterval(id);
+          discordClient = new Client({
+            intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages],
+          });
+          api.logger.warn(
+            "[discord-voice] Using plugin's own Discord client (runtime.discord.getClient() never returned a client). " +
+              "Two connections with the same token cause voice to never reach Ready → bot will leave after ~30s. " +
+              "OpenClaw must expose the Discord client via api.runtime.discord.getClient() for voice to work.",
+          );
+          discordClient.once("clientReady" as "ready", () => {
+            clientReady = true;
+            api.logger.info(`[discord-voice] Discord client ready as ${discordClient?.user?.tag}`);
+            void runAutoJoinIfConfigured();
+          });
+          discordClient.login(discordToken).catch((err) => {
+            api.logger.error(`[discord-voice] Failed to login: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        }
+      }, intervalMs);
+    }
 
     /**
      * Handle transcribed speech - route to agent and get response
