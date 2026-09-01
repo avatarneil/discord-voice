@@ -10,6 +10,7 @@ metadata:
         - OPENAI_API_KEY
         - ELEVENLABS_API_KEY
         - DEEPGRAM_API_KEY
+        - ATLASCLOUD_API_KEY
       systemDependencies:
         - ffmpeg
         - build-essential
@@ -45,7 +46,7 @@ Real-time voice conversations in Discord voice channels. Join a voice channel, s
 - **Speech-to-Text**: Whisper API (OpenAI), Deepgram, or Local Whisper (Offline)
 - **Streaming STT**: Real-time transcription with Deepgram WebSocket (~1s latency reduction)
 - **Agent Integration**: Transcribed speech is routed through the Clawdbot agent
-- **Text-to-Speech**: OpenAI TTS, ElevenLabs, or Kokoro (Local/Offline)
+- **Text-to-Speech**: OpenAI TTS, ElevenLabs, Deepgram, Polly, Edge, Kokoro, or Atlas Cloud (batch)
 - **Audio Playback**: Responses are spoken back in the voice channel
 - **Barge-in Support**: Stops speaking immediately when user starts talking
 - **Auto-reconnect**: Automatic heartbeat monitoring and reconnection on disconnect
@@ -174,6 +175,20 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
   deepgram: {
     apiKey: "...",
     model: "nova-2",
+  },
+}
+```
+
+#### Atlas Cloud (TTS only, batch)
+
+```json5
+{
+  ttsProvider: "atlas",
+  atlas: {
+    apiKey: "...", // Or use ATLASCLOUD_API_KEY
+    model: "xai/tts-v1",
+    voiceId: "eve",
+    language: "auto",
   },
 }
 ```

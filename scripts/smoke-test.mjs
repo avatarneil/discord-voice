@@ -43,6 +43,12 @@ if (existsSync(pluginPath)) {
   } else {
     fail("openclaw.plugin.json: invalid structure");
   }
+  const ttsProviders = manifest.configSchema?.properties?.ttsProvider?.enum ?? [];
+  if (ttsProviders.includes("atlas") && manifest.requirements?.env?.ATLASCLOUD_API_KEY) {
+    ok("openclaw.plugin.json: Atlas TTS config and environment requirement present");
+  } else {
+    fail("openclaw.plugin.json: Atlas TTS config or environment requirement missing");
+  }
 } else {
   fail("openclaw.plugin.json missing");
 }
@@ -133,6 +139,11 @@ if (existsSync(ttsPath)) {
     ok("tts.ts: PollyTTS and polly provider present");
   } else {
     fail("tts.ts: PollyTTS or polly case missing");
+  }
+  if (ttsContent.includes("AtlasTTS") && ttsContent.includes('case "atlas"')) {
+    ok("tts.ts: AtlasTTS and atlas provider present");
+  } else {
+    fail("tts.ts: AtlasTTS or atlas case missing");
   }
 } else {
   fail("src/tts.ts missing");

@@ -21,6 +21,10 @@
       "DEEPGRAM_API_KEY": {
         "required": false,
         "description": "Deepgram API key — needed for deepgram STT provider (fallback if not set in plugin config)"
+      },
+      "ATLASCLOUD_API_KEY": {
+        "required": false,
+        "description": "Atlas Cloud API key — needed for the optional atlas TTS provider"
       }
     },
     "systemDependencies": ["ffmpeg"]
@@ -80,7 +84,7 @@
       },
       "ttsProvider": {
         "type": "string",
-        "enum": ["openai", "elevenlabs", "deepgram", "polly", "edge", "kokoro"],
+        "enum": ["openai", "elevenlabs", "deepgram", "polly", "edge", "kokoro", "atlas"],
         "default": "openai",
         "description": "openai, elevenlabs, deepgram, polly, edge (free), or kokoro (free local)"
       },
@@ -112,12 +116,15 @@
       },
       "ttsFallbackProvider": {
         "type": "string",
-        "enum": ["openai", "elevenlabs", "deepgram", "polly", "edge", "kokoro"],
+        "enum": ["openai", "elevenlabs", "deepgram", "polly", "edge", "kokoro", "atlas"],
         "description": "Single fallback TTS (legacy). Prefer ttsFallbackProviders for multiple fallbacks."
       },
       "ttsFallbackProviders": {
         "type": "array",
-        "items": { "type": "string", "enum": ["openai", "elevenlabs", "deepgram", "polly", "edge", "kokoro"] },
+        "items": {
+          "type": "string",
+          "enum": ["openai", "elevenlabs", "deepgram", "polly", "edge", "kokoro", "atlas"]
+        },
         "description": "Fallback TTS providers tried in order when primary fails (quota/rate limit)"
       },
       "allowedUsers": { "type": "array", "items": { "type": "string" }, "default": [] },
@@ -241,6 +248,16 @@
           }
         }
       },
+      "atlas": {
+        "type": "object",
+        "properties": {
+          "apiKey": { "type": "string" },
+          "model": { "type": "string", "default": "xai/tts-v1" },
+          "voiceId": { "type": "string", "default": "eve" },
+          "language": { "type": "string", "default": "auto" },
+          "timeoutMs": { "type": "number", "default": 90000, "minimum": 1 }
+        }
+      },
       "wyomingWhisper": {
         "type": "object",
         "properties": {
@@ -270,7 +287,7 @@
     },
     "ttsProvider": {
       "label": "Text-to-Speech Provider",
-      "help": "openai, elevenlabs, deepgram, polly, edge, or kokoro"
+      "help": "openai, elevenlabs, deepgram, polly, edge, kokoro, or atlas"
     },
     "ttsVoice": {
       "label": "TTS Voice (deprecated)",
@@ -292,6 +309,9 @@
     "elevenlabs.apiKey": { "label": "ElevenLabs API Key", "sensitive": true },
     "elevenlabs.modelId": { "label": "ElevenLabs Model", "help": "turbo, flash, v2, v3 (or full model ID)" },
     "deepgram.apiKey": { "label": "Deepgram API Key", "sensitive": true },
+    "atlas.apiKey": { "label": "Atlas Cloud API Key", "sensitive": true },
+    "atlas.model": { "label": "Atlas TTS Model", "help": "Default: xai/tts-v1" },
+    "atlas.voiceId": { "label": "Atlas TTS Voice", "help": "Default: eve" },
     "thinkingSound.enabled": { "label": "Thinking Sound", "help": "Play sound while processing (default: on)" },
     "thinkingSound.path": { "label": "Thinking Sound File", "help": "Path to MP3 (default: assets/thinking.mp3)" },
     "thinkingSound.volume": { "label": "Thinking Sound Volume", "help": "Volume 0-1 (default: 0.7)" }

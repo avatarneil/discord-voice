@@ -9,7 +9,7 @@ Real-time voice conversations in Discord voice channels. Join a voice channel, s
 - **Speech-to-Text**: Whisper API (OpenAI), Deepgram, or Local Whisper (Offline)
 - **Streaming STT**: Real-time transcription with Deepgram WebSocket (~1s latency reduction)
 - **Agent Integration**: Transcribed speech is routed through the Clawdbot agent
-- **Text-to-Speech**: OpenAI TTS, ElevenLabs, Deepgram Aura, Amazon Polly, Edge TTS (Microsoft, free), or Kokoro (Local/Offline)
+- **Text-to-Speech**: OpenAI TTS, ElevenLabs, Deepgram Aura, Amazon Polly, Edge TTS, Kokoro, or Atlas Cloud (batch)
 - **Audio Playback**: Responses are spoken back in the voice channel
 - **Barge-in Support**: Stops speaking immediately when user starts talking
 - **Thinking Sound**: Optional looping sound while processing (configurable)
@@ -123,7 +123,7 @@ Add these to your bot's OAuth2 URL or configure in Discord Developer Portal.
 | `sttFallbackProvider`  | string            | `undefined`                           | Single fallback (legacy). Prefer `sttFallbackProviders`.                                                                                                                                      |
 | `sttFallbackProviders` | string[]          | `undefined`                           | Fallback STT when primary fails (quota, rate limit, Wyoming unreachable). E.g. `["local-whisper", "wyoming-whisper"]`.                                                                        |
 | `streamingSTT`         | boolean           | `true`                                | Use streaming STT (Deepgram only, ~1s faster)                                                                                                                                                 |
-| `ttsProvider`          | string            | `"openai"`                            | `"openai"`, `"elevenlabs"`, `"deepgram"`, `"polly"`, `"edge"`, or `"kokoro"`                                                                                                                  |
+| `ttsProvider`          | string            | `"openai"`                            | `"openai"`, `"elevenlabs"`, `"deepgram"`, `"polly"`, `"edge"`, `"kokoro"`, or `"atlas"`                                                                                                   |
 | `ttsVoice`             | string            | `"nova"`                              | Deprecated – use provider-specific: `openai.voice`, `elevenlabs.voiceId`, `kokoro.voice`                                                                                                      |
 | `vadSensitivity`       | string            | `"medium"`                            | `"low"`, `"medium"`, or `"high"`                                                                                                                                                              |
 | `bargeIn`              | boolean           | `true`                                | Stop speaking when user talks                                                                                                                                                                 |
@@ -204,6 +204,24 @@ OpenAI STT options: `whisper` (legacy), `gpt4o-mini` (faster, cheaper), `gpt4o-t
 ```
 
 Use `ttsProvider: "deepgram"` for TTS. Aura models: aura-asteria-en, aura-2-thalia-en, etc. Output: Opus/OGG for Discord.
+
+#### Atlas Cloud (TTS only, batch)
+
+Set `ATLASCLOUD_API_KEY` or provide `atlas.apiKey`, then select the optional provider:
+
+```json5
+{
+  ttsProvider: "atlas",
+  atlas: {
+    model: "xai/tts-v1",
+    voiceId: "eve",
+    language: "auto",
+    timeoutMs: 90000,
+  },
+}
+```
+
+The default Atlas model returns MP3 audio through the asynchronous `generateAudio` API. Generation is submitted once and the prediction is polled with bounded backoff; other TTS defaults are unchanged.
 
 #### Amazon Polly (TTS only)
 
@@ -350,7 +368,7 @@ Once registered with Discord, use these commands (prefix `/discord_voice` to avo
 - `/discord_voice status` - Show voice connection status, STT/TTS provider, model, think level, and available models
 - `/discord_voice reset-fallback` - Reset STT/TTS fallbacks; next request will try primary providers again
 - `/discord_voice set-stt <provider>` - Set STT provider (whisper, gpt4o-mini, deepgram, local-whisper, wyoming-whisper, etc.)
-- `/discord_voice set-tts <provider>` - Set TTS provider (openai, elevenlabs, deepgram, polly, kokoro, edge)
+- `/discord_voice set-tts <provider>` - Set TTS provider (openai, elevenlabs, deepgram, polly, kokoro, edge, atlas)
 - `/discord_voice set-model <model>` - Set LLM model (e.g. google-gemini-cli/gemini-3-fast-preview, xai/grok-4-1-fast-non-reasoning)
 - `/discord_voice set-think <level>` - Set thinking level (off, low, medium, high)
 

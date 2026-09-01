@@ -103,7 +103,7 @@ const VoiceToolSchema = Type.Union([
   }),
   Type.Object({
     action: Type.Literal("set-tts"),
-    provider: Type.String({ description: "TTS provider: openai, elevenlabs, deepgram, polly, kokoro, edge" }),
+    provider: Type.String({ description: "TTS provider: openai, elevenlabs, deepgram, polly, kokoro, edge, atlas" }),
     guildId: Type.Optional(Type.String({ description: "Guild ID (optional)" })),
   }),
   Type.Object({
@@ -615,7 +615,7 @@ const discordVoicePlugin = {
           respond(false, { error: "provider required" });
           return;
         }
-        const valid = ["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge"];
+        const valid = ["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge", "atlas"];
         if (!valid.includes(provider)) {
           respond(false, { error: `Invalid provider. Valid: ${valid.join(", ")}` });
           return;
@@ -836,7 +836,7 @@ const discordVoicePlugin = {
             case "set-tts": {
               const provider = (p as { provider?: string }).provider;
               if (!provider) throw new Error("provider required");
-              const valid = ["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge"];
+              const valid = ["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge", "atlas"];
               if (!valid.includes(provider)) throw new Error(`Invalid provider. Valid: ${valid.join(", ")}`);
               let guildId = (p as { guildId?: string }).guildId;
               if (!guildId) {
@@ -1027,7 +1027,7 @@ const discordVoicePlugin = {
         voiceCmd
           .command("set-tts")
           .description("Set TTS provider for current session")
-          .argument("<provider>", "openai | elevenlabs | deepgram | polly | kokoro | edge")
+          .argument("<provider>", "openai | elevenlabs | deepgram | polly | kokoro | edge | atlas")
           .option("-g, --guild <guildId>", "Guild ID")
           .action(async (provider: string, opts: { guild?: string }) => {
             const vm = ensureVoiceManager();
@@ -1036,7 +1036,7 @@ const discordVoicePlugin = {
               console.log("Not in any voice channel");
               return;
             }
-            const valid = ["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge"];
+            const valid = ["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge", "atlas"];
             if (!valid.includes(provider)) {
               console.error(`Invalid provider. Valid: ${valid.join(", ")}`);
               return;
