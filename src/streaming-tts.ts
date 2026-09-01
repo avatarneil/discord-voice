@@ -183,6 +183,7 @@ export function createStreamingTTSProvider(config: DiscordVoiceConfig): Streamin
     case "polly":
     case "edge":
     case "kokoro":
+    case "atlas":
       return null; // Batch-only providers (no streaming)
     default:
       return new OpenAIStreamingTTS(config);

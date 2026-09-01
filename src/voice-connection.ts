@@ -141,7 +141,7 @@ export interface VoiceSession {
   /** Set when a DAVE decryption error triggered a scheduled rejoin (avoid multiple rejoins) */
   daveRecoveryScheduled?: boolean;
   /** Fallback TTS provider to use for rest of session (set after primary fails with quota/rate limit) */
-  fallbackTtsProvider?: "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge";
+  fallbackTtsProvider?: DiscordVoiceConfig["ttsProvider"];
   /** Fallback STT provider to use for rest of session (set after primary fails) */
   fallbackSttProvider?:
     | "whisper"
@@ -1012,7 +1012,7 @@ export class VoiceConnectionManager {
    */
   private async tryGetResourceWithProvider(
     text: string,
-    provider: "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge",
+    provider: DiscordVoiceConfig["ttsProvider"],
   ): Promise<ReturnType<typeof createAudioResource> | null> {
     const overrideConfig = { ...this.config, ttsProvider: provider };
     const fallbackTts = createTTSProvider(overrideConfig);
@@ -1443,6 +1443,9 @@ export class VoiceConnectionManager {
         break;
       case "edge":
         model = cfg.edge?.voice ?? "de-DE-KatjaNeural";
+        break;
+      case "atlas":
+        model = `${cfg.atlas?.voiceId ?? "eve"} (${cfg.atlas?.model ?? "xai/tts-v1"})`;
         break;
       default:
         model = p;

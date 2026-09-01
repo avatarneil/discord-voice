@@ -30,10 +30,10 @@ export interface DiscordVoiceConfig {
     | "wyoming-whisper"
   )[];
   streamingSTT: boolean; // Use streaming STT (Deepgram only) for lower latency
-  ttsProvider: "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge";
+  ttsProvider: "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge" | "atlas";
   ttsVoice: string;
   /** Fallback TTS providers when primary fails (quota, rate limit), tried in order. E.g. ["edge", "kokoro"] */
-  ttsFallbackProviders?: readonly ("openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge")[];
+  ttsFallbackProviders?: readonly ("openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge" | "atlas")[];
   vadSensitivity: "low" | "medium" | "high";
   bargeIn: boolean; // Stop speaking when user starts talking
   allowedUsers: string[];
@@ -92,6 +92,14 @@ export interface DiscordVoiceConfig {
     model?: string;
     /** TTS model (Aura): aura-asteria-en, aura-2-thalia-en, etc. Default: aura-asteria-en */
     ttsModel?: string;
+  };
+  /** Atlas Cloud batch TTS via xAI TTS v1 */
+  atlas?: {
+    apiKey?: string;
+    model?: string;
+    voiceId?: string;
+    language?: string;
+    timeoutMs?: number;
   };
   /** Amazon Polly TTS */
   polly?: {
@@ -287,19 +295,21 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
   const obj = raw as Record<string, unknown>;
 
   const ttsProviderRaw =
-    obj["ttsProvider"] === "deepgram"
-      ? "deepgram"
-      : obj["ttsProvider"] === "elevenlabs"
-        ? "elevenlabs"
-        : obj["ttsProvider"] === "polly"
-          ? "polly"
-          : obj["ttsProvider"] === "edge"
-            ? "edge"
-            : obj["ttsProvider"] === "kokoro"
-              ? "kokoro"
-              : obj["ttsProvider"] === "openai"
-                ? "openai"
-                : null;
+    obj["ttsProvider"] === "atlas"
+      ? "atlas"
+      : obj["ttsProvider"] === "deepgram"
+        ? "deepgram"
+        : obj["ttsProvider"] === "elevenlabs"
+          ? "elevenlabs"
+          : obj["ttsProvider"] === "polly"
+            ? "polly"
+            : obj["ttsProvider"] === "edge"
+              ? "edge"
+              : obj["ttsProvider"] === "kokoro"
+                ? "kokoro"
+                : obj["ttsProvider"] === "openai"
+                  ? "openai"
+                  : null;
 
   const ttsVoiceVal = typeof obj["ttsVoice"] === "string" ? obj["ttsVoice"] : null;
   const ttsVoice = ttsVoiceVal ?? fallback.ttsVoice ?? DEFAULT_CONFIG.ttsVoice;
@@ -354,14 +364,25 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
       }
       return undefined;
     })(),
-    ttsProvider: (["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge"].includes(obj["ttsProvider"] as string)
+    ttsProvider: (["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge", "atlas"].includes(
+      obj["ttsProvider"] as string,
+    )
       ? obj["ttsProvider"]
-      : ttsProviderRaw) as "openai" | "elevenlabs" | "deepgram" | "polly" | "kokoro" | "edge",
+      : (ttsProviderRaw ?? fallback.ttsProvider ?? DEFAULT_CONFIG.ttsProvider)) as
+      | "openai"
+      | "elevenlabs"
+      | "deepgram"
+      | "polly"
+      | "kokoro"
+      | "edge"
+      | "atlas",
     ttsVoice,
     ttsFallbackProviders: (() => {
-      const valid = ["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge"] as const;
+      const valid = ["openai", "elevenlabs", "deepgram", "polly", "kokoro", "edge", "atlas"] as const;
       const primary = (
-        valid.includes(obj["ttsProvider"] as (typeof valid)[number]) ? obj["ttsProvider"] : ttsProviderRaw
+        valid.includes(obj["ttsProvider"] as (typeof valid)[number])
+          ? obj["ttsProvider"]
+          : (ttsProviderRaw ?? fallback.ttsProvider ?? DEFAULT_CONFIG.ttsProvider)
       ) as (typeof valid)[number];
       const excludePrimary = (p: string) => p !== primary;
       const toProvider = (p: string): (typeof valid)[number] | null =>
@@ -475,6 +496,17 @@ export function parseConfig(raw: unknown, mainConfig?: MainConfig): DiscordVoice
         apiKey: dg["apiKey"] as string | undefined,
         model: isAura(m) ? "nova-2" : m || "nova-2",
         ttsModel: tm || (isAura(m) ? m : "aura-asteria-en"),
+      };
+    })(),
+    atlas: (() => {
+      const atlas = obj["atlas"] && typeof obj["atlas"] === "object" ? (obj["atlas"] as Record<string, unknown>) : null;
+      if (!atlas) return undefined;
+      return {
+        apiKey: typeof atlas["apiKey"] === "string" ? atlas["apiKey"].trim() : undefined,
+        model: typeof atlas["model"] === "string" && atlas["model"].trim() ? atlas["model"].trim() : "xai/tts-v1",
+        voiceId: typeof atlas["voiceId"] === "string" && atlas["voiceId"].trim() ? atlas["voiceId"].trim() : "eve",
+        language: typeof atlas["language"] === "string" && atlas["language"].trim() ? atlas["language"].trim() : "auto",
+        timeoutMs: typeof atlas["timeoutMs"] === "number" && atlas["timeoutMs"] > 0 ? atlas["timeoutMs"] : 90_000,
       };
     })(),
     localWhisper:

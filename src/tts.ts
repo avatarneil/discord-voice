@@ -16,6 +16,26 @@ function truncateError(text: string, maxLen = 200): string {
   return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
 }
 
+const ATLAS_BASE_URL = "https://api.atlascloud.ai/api/v1";
+
+interface AtlasPrediction {
+  id?: string;
+  status?: string;
+  outputs?: string[] | null;
+  error?: string;
+}
+
+function atlasPrediction(payload: unknown): AtlasPrediction {
+  if (!payload || typeof payload !== "object") return {};
+  const root = payload as Record<string, unknown>;
+  const data = root["data"];
+  return data && typeof data === "object" ? (data as AtlasPrediction) : (root as AtlasPrediction);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Helper type for voice keys since it's not easily accessible
 type KokoroVoice = keyof KokoroTTS["voices"];
 
@@ -130,6 +150,106 @@ export class ElevenLabsTTS implements TTSProvider {
       audioBuffer: Buffer.from(arrayBuffer),
       format: "mp3",
       sampleRate: 44100,
+    };
+  }
+}
+
+/** Atlas Cloud batch TTS via the xAI TTS v1 model. */
+export class AtlasTTS implements TTSProvider {
+  private apiKey: string;
+  private model: string;
+  private voiceId: string;
+  private language: string;
+  private timeoutMs: number;
+
+  constructor(config: DiscordVoiceConfig) {
+    this.apiKey = config.atlas?.apiKey || process.env["ATLASCLOUD_API_KEY"] || "";
+    this.model = config.atlas?.model || "xai/tts-v1";
+    this.voiceId = config.atlas?.voiceId || "eve";
+    this.language = config.atlas?.language || "auto";
+    this.timeoutMs = config.atlas?.timeoutMs || 90_000;
+
+    if (!this.apiKey) {
+      throw new Error("Atlas Cloud API key required for Atlas TTS");
+    }
+  }
+
+  private headers(): Record<string, string> {
+    return {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    };
+  }
+
+  async synthesize(text: string): Promise<TTSResult> {
+    // Generation POSTs are billable and deliberately never retried.
+    const submit = await fetch(`${ATLAS_BASE_URL}/model/generateAudio`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({
+        model: this.model,
+        text,
+        voice_id: this.voiceId,
+        language: this.language,
+        codec: "mp3",
+        sample_rate: 24000,
+        bit_rate: 128000,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!submit.ok) {
+      throw new Error(`Atlas TTS submit error: ${submit.status} ${truncateError(await submit.text())}`);
+    }
+
+    const prediction = atlasPrediction(await submit.json());
+    if (!prediction.id) throw new Error("Atlas TTS submit response did not include a prediction ID");
+
+    const deadline = Date.now() + this.timeoutMs;
+    let delayMs = 1_000;
+    let completed: AtlasPrediction | undefined;
+
+    while (Date.now() < deadline) {
+      await sleep(delayMs);
+      let poll: Response;
+      try {
+        poll = await fetch(`${ATLAS_BASE_URL}/model/prediction/${encodeURIComponent(prediction.id)}`, {
+          headers: this.headers(),
+          signal: AbortSignal.timeout(15_000),
+        });
+      } catch {
+        delayMs = Math.min(Math.round(delayMs * 1.5), 5_000);
+        continue;
+      }
+      if (!poll.ok) {
+        if (poll.status >= 500 || poll.status === 429) {
+          delayMs = Math.min(Math.round(delayMs * 1.5), 5_000);
+          continue;
+        }
+        throw new Error(`Atlas TTS poll error: ${poll.status} ${truncateError(await poll.text())}`);
+      }
+
+      const current = atlasPrediction(await poll.json());
+      if (current.status === "completed" || current.status === "succeeded") {
+        completed = current;
+        break;
+      }
+      if (["failed", "timeout", "canceled", "cancelled"].includes(current.status || "")) {
+        throw new Error(`Atlas TTS task ${current.status}: ${truncateError(current.error || "unknown error")}`);
+      }
+      delayMs = Math.min(Math.round(delayMs * 1.5), 5_000);
+    }
+
+    const outputUrl = completed?.outputs?.[0];
+    if (!outputUrl) throw new Error("Atlas TTS task timed out or returned no audio output");
+
+    const audio = await fetch(outputUrl, { signal: AbortSignal.timeout(30_000) });
+    if (!audio.ok) throw new Error(`Atlas TTS audio download error: ${audio.status}`);
+
+    return {
+      audioBuffer: Buffer.from(await audio.arrayBuffer()),
+      format: "mp3",
+      sampleRate: 24000,
     };
   }
 }
@@ -385,6 +505,8 @@ export class EdgeTTSProvider implements TTSProvider {
  */
 export function createTTSProvider(config: DiscordVoiceConfig): TTSProvider {
   switch (config.ttsProvider) {
+    case "atlas":
+      return new AtlasTTS(config);
     case "deepgram":
       return new DeepgramTTS(config);
     case "elevenlabs":
